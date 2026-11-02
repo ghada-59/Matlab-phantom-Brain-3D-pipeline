@@ -48,6 +48,25 @@ Le test de cette étape est `tests/PipelineTest.m`. Il recalcule les formules. I
 
 Pièges couverts dans le code : voxel anisotrope, `RescaleIntercept` oublié, table du scanner laissée comme seconde composante, confusion `meshgrid` / `ndgrid` (le maillage est construit en ordre image : ligne = y, colonne = x).
 
+## Étape 3 — export et validation
+
+Tout fichier de résultats est produit par une exécution. **Aucun n'a été généré ici**, et aucun n'est versionné (`results/` est ignoré par git).
+
+`runProject` enchaîne, quand vous le lancez dans MATLAB :
+
+- `validatePhantoms` : tailles de voxel **0,5 / 1 / 2 mm** (paramètres du plan), bruit **0 et 100 HU** (paramètres), rotation de 30 degrés sur des voxels cubiques. Pour chaque condition le code calcule l'erreur relative du volume voxel, du volume maillage, de l'aire et des demi-axes, plus l'écart entre Otsu et le seuil fixe, et l'écart de volume après rotation. La sortie est `results/validation.csv`.
+- `runBatch` : 10 fantômes à demi-axes aléatoires, `results/batch.csv`.
+- `exportResults` : `results.json` (version, unités, mesures), coupes PNG fenêtrées avec le préréglage d'affichage os 1800/400 HU, coupes JSON en HU bruts, `bone.stl`. `rotation.mp4` et les figures sont tentés ; sans affichage, le JSON indique `not_generated` et la raison, et un fichier vidéo partiel est supprimé.
+- `compareDenoising` : gaussien, médian, bilatéral, moyennes non locales, Wiener. PSNR, SSIM si `ssim` existe, et surtout l'erreur de volume. `results/denoise.json`.
+
+Les coupes PNG ne sont pas du WebP : `imwrite` de MATLAB R2022b n'écrit pas le WebP. Les HU bruts sont dans le JSON de coupe, l'unité est HU.
+
+```matlab
+runProject
+```
+
+Le test de cette étape est `tests/ExportTest.m`. Il recalcule les erreurs à partir des volumes qu'il vient d'obtenir. Il n'a pas été lancé ici.
+
 ## Ce qui n'est pas encore dans ce dépôt
 
-L'export (`results.json`, coupes, STL, vidéo, `validation.csv`) et le dashboard viennent ensuite. Aucun fichier de résultats n'a été généré.
+Le dashboard statique vient ensuite. Sans `results.json` produit par MATLAB, il affichera « — ».

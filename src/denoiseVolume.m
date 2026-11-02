@@ -1,0 +1,75 @@
+function denoised = denoiseVolume(hu, method, spacingMM, sigmaMM)
+%DENOISEVOLUME One denoising method on a 3-D HU volume.
+%
+%   gaussian  imgaussfilt3, sigma in millimetres converted per axis
+%   median    medfilt3, 3-by-3-by-3 neighbourhood, on HU
+%   bilateral imbilatfilt, on intensities stretched to [0, 1], then stretched back
+%   nlm       imnlmfilt, same stretch
+%   wiener    wiener2 slice by slice, same stretch
+%
+%   Bilateral, non-local means, and Wiener are applied slice by slice. In the
+%   targeted toolbox those functions are 2-D. A 3-D non-local means on a full
+%   CT is a different algorithm and is not used here.
+%   Stretching to [0, 1] uses the min and max of THIS volume. Those bounds are
+%   properties of the input array, computed here, not published constants.
+
+    assertImageToolbox();
+    if nargin < 4 || isempty(sigmaMM)
+        sigmaMM = 0.8;
+    end
+    hu = double(hu);
+    spacing = double(spacingMM(:)');
+    if ndims(hu) ~= 3 || any(~isfinite(hu(:)))
+        error('denoiseVolume:InvalidVolume', 'HU volume must be a finite 3-D array.');
+    end
+    if numel(spacing) ~= 3 || any(spacing <= 0)
+        error('denoiseVolume:InvalidSpacing', 'spacingMM must be a positive 3-vector.');
+    end
+
+    switch lower(char(method))
+        case 'gaussian'
+            if ~isscalar(sigmaMM) || ~isfinite(sigmaMM) || sigmaMM <= 0
+                error('denoiseVolume:InvalidSigma', 'SigmaMM must be a positive finite scalar.');
+            end
+            denoised = imgaussfilt3(hu, sigmaMM ./ spacing);
+        case 'median'
+            denoised = medfilt3(hu, [3 3 3]);
+        case 'bilateral'
+            denoised = denoiseSlicewise(hu, @imbilatfilt);
+        case 'nlm'
+            denoised = denoiseSlicewise(hu, @imnlmfilt);
+        case 'wiener'
+            denoised = denoiseSlicewise(hu, @(slice) wiener2(slice, [3 3]));
+        otherwise
+            error('denoiseVolume:UnknownMethod', ...
+                'Method must be gaussian, median, bilateral, nlm, or wiener.');
+    end
+end
+
+function out = denoiseSlicewise(hu, filterFcn)
+    [normed, lo, hi, unchanged] = stretchToUnit(hu);
+    if unchanged
+        out = hu;
+        return;
+    end
+    filtered = denoiseEachSlice(normed, filterFcn);
+    out = filtered .* (hi - lo) + lo;
+end
+
+function filtered = denoiseEachSlice(normed, filterFcn)
+    filtered = zeros(size(normed));
+    for sliceIndex = 1:size(normed, 3)
+        filtered(:, :, sliceIndex) = filterFcn(normed(:, :, sliceIndex));
+    end
+end
+
+function [normed, lo, hi, unchanged] = stretchToUnit(hu)
+    lo = min(hu(:));
+    hi = max(hu(:));
+    unchanged = ~isfinite(lo) || ~isfinite(hi) || hi <= lo;
+    if unchanged
+        normed = hu;
+        return;
+    end
+    normed = (hu - lo) ./ (hi - lo);
+end
