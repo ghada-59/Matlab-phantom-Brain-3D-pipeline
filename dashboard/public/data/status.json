@@ -1,0 +1,23 @@
+{
+  "version": "1.0",
+  "executed": false,
+  "clinical": false,
+  "academic": true,
+  "units": {
+    "length": "mm",
+    "area": "mm^2",
+    "volume": "mm^3",
+    "intensity": "HU",
+    "relativeError": "1"
+  },
+  "reason": "MATLAB n'a pas été exécuté. Aucune mesure n'a été produite.",
+  "files": {
+    "results.json": false,
+    "validation.csv": false,
+    "batch.csv": false,
+    "denoise.json": false,
+    "bone.stl": false,
+    "rotation.mp4": false,
+    "slices": false
+  }
+}

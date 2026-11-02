@@ -67,6 +67,30 @@ runProject
 
 Le test de cette étape est `tests/ExportTest.m`. Il recalcule les erreurs à partir des volumes qu'il vient d'obtenir. Il n'a pas été lancé ici.
 
-## Ce qui n'est pas encore dans ce dépôt
+## Étape 4 — dashboard statique
 
-Le dashboard statique vient ensuite. Sans `results.json` produit par MATLAB, il affichera « — ».
+Le dashboard est dans `dashboard/`. Il lit uniquement `dashboard/public/data/`. Le fichier versionné `status.json` a `"executed": false`. Chaque mesure absente s'affiche « — ». Aucun chiffre de volume, d'aire, d'axe, de sphéricité, de PSNR ou d'erreur n'est codé en dur.
+
+Pages : Coupes, 3D, Mesures, Validation, Débruitage, Vidéo, À propos. Pile : React 18, Vite, JSX, React Router en mode hash, Context et `useReducer`. Le maillage passe par three.js (`STLLoader`, `OrbitControls`). Pas de Bootstrap. Pas de colormap jet. Chaque colorbar indique son unité (HU). Les coupes restent en niveaux de gris.
+
+Les préréglages de fenêtre 1800/400, 400/40 et 1600/−600 HU sont des réglages d'affichage, pas des mesures. Les tailles de voxel 0,5 / 1 / 2 mm citées sur la page Validation sont les conditions prévues par le code, pas des erreurs observées.
+
+`npm install` n'a pas été lancé, et l'interface n'a pas été ouverte. Pour la lancer sur votre machine, après installation des paquets listés dans `dashboard/package.json` :
+
+```bat
+cd dashboard
+npm install
+npm run dev
+```
+
+Vite écoute sur `0.0.0.0` et le port `PORT`, sinon 5173. Ouvrir `index.html` en `file://` ne charge pas `status.json`.
+
+`runProject` copie les exports vers `dashboard/public/data/` lorsque ce dossier existe. Il ne remplace pas `status.json`. Le dashboard n'utilise `results.json` que si `executed` est vrai et si `version` est celle de `status.json`.
+
+Les coupes ne sont pas en WebP : MATLAB R2022b n'écrit pas ce format avec `imwrite`. Le dépôt fournit un PNG fenêtré et un JSON des HU bruts. Radix UI, Recharts et react-three-fiber ne sont pas des dépendances : rien n'a été installé pour les ajouter, et les contrôles natifs plus three.js couvrent les vues. Le débruitage par ondelettes (`wdenoise2`) n'est pas inclus : il demande la Wavelet Toolbox, qui n'est pas supposée.
+
+Le test de cette étape est `tests/DashboardContractTest.m`. Il vérifie le tiret cadratin, l'absence de mesures dans `status.json`, l'unité des colorbars et l'absence de jet. Il n'a pas été lancé ici.
+
+## Ce qui reste « — »
+
+Aucun fichier de `results/` n'a été produit. Restent non mesurés, donc affichés « — » : volumes voxel et maillage, aires, demi-axes, sphéricité, solidité, erreurs relatives, PSNR, SSIM, seuil issu d'une exécution, étendue du STL, coupes, vidéo, `validation.csv`, `batch.csv`, `denoise.json` et les figures.

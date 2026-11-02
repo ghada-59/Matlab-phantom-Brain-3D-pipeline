@@ -1,0 +1,24 @@
+name: checks
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  honesty:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject a rainbow colormap and committed measurements
+        run: |
+          set -euo pipefail
+          if grep -RInE "colormap[[:space:]]*\([[:space:]]*['\"]?jet" src dashboard tests; then
+            echo "A rainbow colormap call is not allowed."
+            exit 1
+          fi
+          if [ -f results/validation.csv ] || [ -f results/results.json ] || [ -f results/denoise.json ]; then
+            echo "Measured exports must not be committed."
+            exit 1
+          fi
+          grep -q '"executed": false' dashboard/public/data/status.json
+          grep -F 'matlab -batch "runtests('"'"'tests'"'"')"' README.md

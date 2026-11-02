@@ -1,0 +1,17 @@
+:root {
+  --bg: #faf6ef;
+  --surface: #ffffff;
+  --text: #2b2420;
+  --accent: #b8502f;
+  --petrol: #2f6f73;
+  --ivory: #e8dcc8;
+  --line: #e4d8c8;
+  --muted: #6d625b;
+  --viewport: #1c1916;
+  --font-serif: 'Source Serif 4', 'Palatino Linotype', Palatino, Georgia, serif;
+  --font-sans: 'Public Sans', 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, 'Cascadia Mono', 'Segoe UI Mono', monospace;
+  --radius: 3px;
+  --sidebar: 210px;
+  --measures: 280px;
+}
