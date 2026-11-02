@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useReducer } from 'react';
+import { createContext, createElement, useContext, useEffect, useReducer } from 'react';
 import { parseCsv, publicData } from '../utils/paths.js';
 import { WINDOW_PRESETS } from '../utils/windowLevel.js';
 
@@ -117,11 +117,7 @@ export function AppStateProvider({ children }) {
     };
   }, []);
 
-  return (
-    <AppStateContext.Provider value={{ state, dispatch }}>
-      {children}
-    </AppStateContext.Provider>
-  );
+  return createElement(AppStateContext.Provider, { value: { state, dispatch } }, children);
 }
 
 export function useAppState() {
