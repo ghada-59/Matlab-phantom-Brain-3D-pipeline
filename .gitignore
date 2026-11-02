@@ -1,0 +1,24 @@
+.DS_Store
+*.asv
+*.m~
+*.mlx
+slprj/
+codegen/
+
+# Generated volumes and measured exports stay out of git.
+# They are produced only by a local MATLAB run.
+data/*
+!data/.gitkeep
+results/*
+!results/.gitkeep
+
+dashboard/node_modules/
+dashboard/dist/
+dashboard/public/data/results.json
+dashboard/public/data/validation.csv
+dashboard/public/data/batch.csv
+dashboard/public/data/denoise.json
+dashboard/public/data/bone.stl
+dashboard/public/data/rotation.mp4
+dashboard/public/data/slices/
+dashboard/public/data/figures/
