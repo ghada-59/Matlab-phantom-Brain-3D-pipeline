@@ -6,10 +6,14 @@ function denoised = denoiseVolume(hu, method, spacingMM, sigmaMM)
 %   bilateral imbilatfilt, on intensities stretched to [0, 1], then stretched back
 %   nlm       imnlmfilt, same stretch
 %   wiener    wiener2 slice by slice, same stretch
+%   wavelet   wdenoise2 slice by slice, on HU, only if that function exists
 %
 %   Bilateral, non-local means, and Wiener are applied slice by slice. In the
 %   targeted toolbox those functions are 2-D. A 3-D non-local means on a full
 %   CT is a different algorithm and is not used here.
+%   Wavelet denoising needs the Wavelet Toolbox (wdenoise2). If it is missing
+%   this function errors with identifier denoiseVolume:WaveletToolboxMissing.
+%   It does not return a copy of the input and it does not invent a PSNR.
 %   Stretching to [0, 1] uses the min and max of THIS volume. Those bounds are
 %   properties of the input array, computed here, not published constants.
 
@@ -40,10 +44,21 @@ function denoised = denoiseVolume(hu, method, spacingMM, sigmaMM)
             denoised = denoiseSlicewise(hu, @imnlmfilt);
         case 'wiener'
             denoised = denoiseSlicewise(hu, @(slice) wiener2(slice, [3 3]));
+        case 'wavelet'
+            if ~waveletDenoiseAvailable()
+                error('denoiseVolume:WaveletToolboxMissing', ...
+                    ['wdenoise2 is not on the path. Wavelet Toolbox is required. ', ...
+                     'No denoised volume and no PSNR are produced.']);
+            end
+            denoised = denoiseEachSlice(hu, @wdenoise2);
         otherwise
             error('denoiseVolume:UnknownMethod', ...
-                'Method must be gaussian, median, bilateral, nlm, or wiener.');
+                'Method must be gaussian, median, bilateral, nlm, wiener, or wavelet.');
     end
+end
+
+function available = waveletDenoiseAvailable()
+    available = exist('wdenoise2', 'file') == 2 || exist('wdenoise2', 'builtin') == 5;
 end
 
 function out = denoiseSlicewise(hu, filterFcn)

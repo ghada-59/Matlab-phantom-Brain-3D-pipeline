@@ -8,6 +8,7 @@ const METHODS = [
   ['bilateral', 'Bilatéral'],
   ['nlm', 'Moyennes non locales'],
   ['wiener', 'Wiener'],
+  ['wavelet', 'Ondelettes'],
 ];
 
 export default function CompareGrid({ denoise }) {
@@ -20,6 +21,9 @@ export default function CompareGrid({ denoise }) {
           return (
             <article key={id}>
               <h3>{label}</h3>
+              {method?.status === 'unavailable' && (
+                <p className="unit">{method.note || 'Méthode non disponible. Aucune métrique.'}</p>
+              )}
               <p>PSNR <span className="num">{formatMeasurement(method?.psnrHU, { digits: 2, unit: 'dB' })}</span></p>
               <p>SSIM <span className="num">{formatMeasurement(method?.ssimMean, { digits: 3, unit: '1' })}</span></p>
               <p>Erreur de volume <span className="num">{formatRelative(method?.relErrVoxelVolume)}</span></p>
@@ -42,7 +46,7 @@ export default function CompareGrid({ denoise }) {
 function Profile({ denoise }) {
   const profile = denoise?.profile;
   const first = denoise?.methods?.[0];
-  if (!profile || !isMeasured(profile.positionMM) || !isMeasured(profile.referenceHU) || !first?.profileHU) {
+  if (!profile || !isMeasured(profile.positionMM) || !isMeasured(profile.referenceHU) || !isMeasured(first?.profileHU)) {
     return (
       <div className="chart-empty">
         <p>Profil d'intensité le long d'une ligne</p>

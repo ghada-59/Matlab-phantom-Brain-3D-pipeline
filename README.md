@@ -57,7 +57,7 @@ Tout fichier de résultats est produit par une exécution. **Aucun n'a été gé
 - `validatePhantoms` : tailles de voxel **0,5 / 1 / 2 mm** (paramètres du plan), bruit **0 et 100 HU** (paramètres), rotation de 30 degrés sur des voxels cubiques. Pour chaque condition le code calcule l'erreur relative du volume voxel, du volume maillage, de l'aire et des demi-axes, plus l'écart entre Otsu et le seuil fixe, et l'écart de volume après rotation. La sortie est `results/validation.csv`.
 - `runBatch` : 10 fantômes à demi-axes aléatoires, `results/batch.csv`.
 - `exportResults` : `results.json` (version, unités, mesures), coupes PNG fenêtrées avec le préréglage d'affichage os 1800/400 HU, coupes JSON en HU bruts, `bone.stl`. `rotation.mp4` et les figures sont tentés ; sans affichage, le JSON indique `not_generated` et la raison, et un fichier vidéo partiel est supprimé.
-- `compareDenoising` : gaussien, médian, bilatéral, moyennes non locales, Wiener. PSNR, SSIM si `ssim` existe, et surtout l'erreur de volume. `results/denoise.json`.
+- `compareDenoising` : gaussien, médian, bilatéral, moyennes non locales, Wiener, et ondelettes si `wdenoise2` existe. PSNR, SSIM si `ssim` existe, et surtout l'erreur de volume. Sans Wavelet Toolbox, la méthode ondelettes a le statut `unavailable` et aucune de ces métriques. `results/denoise.json`.
 
 Les coupes PNG ne sont pas du WebP : `imwrite` de MATLAB R2022b n'écrit pas le WebP. Les HU bruts sont dans le JSON de coupe, l'unité est HU.
 
@@ -87,7 +87,7 @@ Vite écoute sur `0.0.0.0` et le port `PORT`, sinon 5173. Ouvrir `index.html` en
 
 `runProject` copie les exports vers `dashboard/public/data/` lorsque ce dossier existe. Il ne remplace pas `status.json`. Le dashboard n'utilise `results.json` que si `executed` est vrai et si `version` est celle de `status.json`.
 
-Les coupes ne sont pas en WebP : MATLAB R2022b n'écrit pas ce format avec `imwrite`. Le dépôt fournit un PNG fenêtré et un JSON des HU bruts. Radix UI, Recharts et react-three-fiber ne sont pas des dépendances : rien n'a été installé pour les ajouter, et les contrôles natifs plus three.js couvrent les vues. Le débruitage par ondelettes (`wdenoise2`) n'est pas inclus : il demande la Wavelet Toolbox, qui n'est pas supposée.
+Les coupes ne sont pas en WebP : MATLAB R2022b n'écrit pas ce format avec `imwrite`. Le dépôt fournit un PNG fenêtré et un JSON des HU bruts. Radix UI, Recharts et react-three-fiber ne sont pas des dépendances : les contrôles natifs et three.js couvrent les vues. Le débruitage par ondelettes appelle `wdenoise2` seulement si la Wavelet Toolbox est installée. Sinon le statut est `unavailable` et le PSNR, le SSIM, le volume et le profil restent « — ». Aucun PSNR de remplacement n'est écrit.
 
 Le test de cette étape est `tests/DashboardContractTest.m`. Il vérifie le tiret cadratin, l'absence de mesures dans `status.json`, l'unité des colorbars et l'absence de jet. Il n'a pas été lancé ici.
 

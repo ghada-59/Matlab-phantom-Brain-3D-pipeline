@@ -2,7 +2,11 @@ function report = compareDenoising(phantom, varargin)
 %COMPAREDENOISING Denoising methods and their effect on volume error.
 %
 %   Methods: gaussian (imgaussfilt3), median (medfilt3), bilateral
-%   (imbilatfilt), non-local means (imnlmfilt), Wiener (wiener2).
+%   (imbilatfilt), non-local means (imnlmfilt), Wiener (wiener2), and
+%   wavelet (wdenoise2) when the Wavelet Toolbox is installed.
+%   If wdenoise2 is missing, that method is status "unavailable": PSNR, SSIM,
+%   volume, and the profile stay non-finite. They are not filled with a copy
+%   of another method.
 %   PSNR uses the noiseless phantom (mask painted with BoneHU / BackgroundHU)
 %   as the reference. SSIM is the mean of slice-wise ssim on that same
 %   normalized range, skipping slices that are constant in the reference.
@@ -16,7 +20,7 @@ function report = compareDenoising(phantom, varargin)
     assertImageToolbox();
     parser = inputParser;
     parser.FunctionName = 'compareDenoising';
-    parser.addParameter('Methods', {'gaussian', 'median', 'bilateral', 'nlm', 'wiener'});
+    parser.addParameter('Methods', {'gaussian', 'median', 'bilateral', 'nlm', 'wiener', 'wavelet'});
     parser.addParameter('SigmaMM', 0.8);
     parser.addParameter('OutDir', '');
     parser.parse(varargin{:});
@@ -44,17 +48,20 @@ function report = compareDenoising(phantom, varargin)
     methods = cell(1, numel(opt.Methods));
     for index = 1:numel(opt.Methods)
         name = char(opt.Methods{index});
-        denoised = denoiseVolume(hu, name, spacing, opt.SigmaMM);
-        measured = measureVolume(denoised, spacing, analytic);
-        methods{index} = struct( ...
-            'name', string(name), ...
-            'sigmaMM', opt.SigmaMM, ...
-            'psnrHU', psnrHU(reference, denoised), ...
-            'ssimMean', meanSliceSsim(reference, denoised), ...
-            'voxelVolumeMM3', measured.voxelVolumeMM3, ...
-            'relErrVoxelVolume', measured.relErrVoxelVolume, ...
-            'note', string(measured.note), ...
-            'profileHU', double(denoised(midRow, :, midSlice)));
+        try
+            denoised = denoiseVolume(hu, name, spacing, opt.SigmaMM);
+            measured = measureVolume(denoised, spacing, analytic);
+            methods{index} = methodRecord(name, opt.SigmaMM, "computed", ...
+                psnrHU(reference, denoised), meanSliceSsim(reference, denoised), ...
+                measured.voxelVolumeMM3, measured.relErrVoxelVolume, ...
+                string(measured.note), double(denoised(midRow, :, midSlice)));
+        catch ME
+            if ~strcmp(ME.identifier, 'denoiseVolume:WaveletToolboxMissing')
+                rethrow(ME);
+            end
+            methods{index} = methodRecord(name, opt.SigmaMM, "unavailable", ...
+                NaN, NaN, NaN, NaN, string(ME.message), nan(1, 0));
+        end
     end
 
     report = struct();
@@ -89,16 +96,35 @@ function report = compareDenoising(phantom, varargin)
             payload.methods(index).relErrVoxelVolume = jsonSafeNumber(payload.methods(index).relErrVoxelVolume);
         end
         writeJson(payload, report.jsonPath);
-        first = denoiseVolume(hu, report.methods(1).name, spacing, opt.SigmaMM);
-        difference = first(:, :, midSlice) - reference(:, :, midSlice);
-        report.differencePng = fullfile(opt.OutDir, 'denoise_difference.png');
-        try
-            renderDifference(difference, spacing, report.differencePng);
-        catch ME
+        if strcmp(char(report.methods(1).status), 'computed')
+            first = denoiseVolume(hu, report.methods(1).name, spacing, opt.SigmaMM);
+            difference = first(:, :, midSlice) - reference(:, :, midSlice);
+            report.differencePng = fullfile(opt.OutDir, 'denoise_difference.png');
+            try
+                renderDifference(difference, spacing, report.differencePng);
+            catch ME
+                report.differencePng = '';
+                report.differenceNote = ME.message;
+            end
+        else
             report.differencePng = '';
-            report.differenceNote = ME.message;
+            report.differenceNote = 'First method was not computed. No difference image.';
         end
     end
+end
+
+function row = methodRecord(name, sigmaMM, status, psnrValue, ssimValue, ...
+        voxelVolume, relErr, note, profileHU)
+    row = struct( ...
+        'name', string(name), ...
+        'status', string(status), ...
+        'sigmaMM', sigmaMM, ...
+        'psnrHU', psnrValue, ...
+        'ssimMean', ssimValue, ...
+        'voxelVolumeMM3', voxelVolume, ...
+        'relErrVoxelVolume', relErr, ...
+        'note', note, ...
+        'profileHU', profileHU);
 end
 
 function measured = measureVolume(hu, spacing, analytic)

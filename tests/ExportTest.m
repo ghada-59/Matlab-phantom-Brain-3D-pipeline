@@ -160,6 +160,37 @@ classdef ExportTest < matlab.unittest.TestCase
             end
             testCase.verifyEqual(report.profile.unitIntensity, 'HU');
             testCase.verifyEqual(report.profile.unitPosition, 'mm');
+            testCase.verifyEqual(char(report.methods(1).status), 'computed');
+        end
+
+        function testWaveletWithoutToolboxDoesNotInventMetrics(testCase)
+            phantom = generateEllipsoidPhantom( ...
+                'SemiAxesMM', [8 6 5], ...
+                'VoxelSpacingMM', [1 1 1], ...
+                'NoiseSigmaHU', 0, ...
+                'MarginMM', 2, ...
+                'Seed', 5);
+            report = compareDenoising(phantom, 'Methods', {'wavelet'});
+            row = report.methods;
+            testCase.verifyEqual(char(row.name), 'wavelet');
+            available = exist('wdenoise2', 'file') == 2 || exist('wdenoise2', 'builtin') == 5;
+            if available
+                testCase.verifyEqual(char(row.status), 'computed');
+                testCase.verifyTrue(isfinite(row.psnrHU));
+                denoised = denoiseVolume(phantom.volumeHU, 'wavelet', phantom.spacingMM, row.sigmaMM);
+                reference = phantom.backgroundHU * ones(size(phantom.volumeHU));
+                reference(phantom.mask) = phantom.boneHU;
+                testCase.verifyEqual(row.psnrHU, psnrHU(reference, denoised), 'AbsTol', 1e-9);
+            else
+                testCase.verifyEqual(char(row.status), 'unavailable');
+                testCase.verifyFalse(isfinite(row.psnrHU));
+                testCase.verifyFalse(isfinite(row.ssimMean));
+                testCase.verifyFalse(isfinite(row.voxelVolumeMM3));
+                testCase.verifyFalse(isfinite(row.relErrVoxelVolume));
+                testCase.verifyEmpty(row.profileHU);
+                testCase.verifyFalse(any(isfinite(row.profileHU)));
+                testCase.verifyTrue(contains(char(row.note), 'wdenoise2'));
+            end
         end
 
         function testColormapsAndColorbarUnits(testCase)
