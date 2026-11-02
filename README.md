@@ -75,7 +75,9 @@ Pages : Coupes, 3D, Mesures, Validation, Débruitage, Vidéo, À propos. Pile : 
 
 Les préréglages de fenêtre 1800/400, 400/40 et 1600/−600 HU sont des réglages d'affichage, pas des mesures. Les tailles de voxel 0,5 / 1 / 2 mm citées sur la page Validation sont les conditions prévues par le code, pas des erreurs observées.
 
-`npm install` n'a pas été lancé, et l'interface n'a pas été ouverte. Pour la lancer sur votre machine, après installation des paquets listés dans `dashboard/package.json` :
+`npm install` et `npm run build` ont été exécutés dans cet environnement. Le site produit est `dashboard/dist/`, qui n'est pas versionné. Chrome headless a ouvert les pages Coupes, 3D, Mesures, Validation, Débruitage, Vidéo et À propos : `executed` reste non, chaque mesure affiche « — », et les colorbars portent l'unité HU. Ce n'est pas une exécution MATLAB.
+
+Pour relancer le serveur de développement :
 
 ```bat
 cd dashboard
