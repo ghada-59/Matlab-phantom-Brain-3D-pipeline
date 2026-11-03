@@ -10,22 +10,23 @@ function meas = meshAndMeasure(mask, spacingMM, varargin)
 %   areas. Mesh volume is the absolute divergence-theorem volume. Smoothing
 %   the mesh does not change the voxel volume.
 %
-%   Principal semi-axes are estimated by PCA of the voxel-centre coordinates
-%   in millimetres. For a uniformly filled ellipsoid the coordinate variance
-%   along a principal axis equals (semi-axis)^2 / 5, so
+%   Principal semi-axes are estimated from the covariance of the voxel-centre
+%   coordinates in millimetres, with eig (base MATLAB). The Statistics
+%   Toolbox function pca is not used. For a uniformly filled ellipsoid the
+%   coordinate variance along a principal axis equals (semi-axis)^2 / 5, so
 %
 %       semiAxis = sqrt(5 * eigenvalue).
 %
 %   Sheppard's correction adds s^2/12 on the matching diagonal to account
 %   for the finite voxel. Eigenvectors are unit directions in (x, y, z) =
 %   (column, row, slice). They are sorted from the longest semi-axis to the
-%   shortest.
+%   shortest. These semi-axes are the quantities compared with the analytic
+%   a, b, c, both in millimetres.
 %
-%   regionprops3 is also called. Its PrincipalAxisLength values are in
-%   voxel units and assume isotropic pixels, so they are reported for
-%   comparison and are not converted with one spacing. Solidity and the
-%   voxel count come from the same call. Orientation is the table returned
-%   by regionprops3, in degrees, and is not a clinical angle.
+%   regionprops3 PrincipalAxisLength is a different definition: the full
+%   length of the equivalent-ellipsoid axes, in isotropic voxel units. It is
+%   not a, b, or c, and it is not converted with one spacing. Solidity comes
+%   from the same call. Orientation is in degrees and is not a clinical angle.
 
     assertImageToolbox();
     parser = inputParser;
@@ -115,6 +116,12 @@ function meas = meshAndMeasure(mask, spacingMM, varargin)
     meas.sphericityVoxel = sphericity(voxelVolumeMM3, meshAreaMM2);
     meas.solidity = solidity;
     meas.principalAxisLengthVoxels = principalAxisLengthVoxels;
+    meas.principalAxisLengthUnit = 'voxel';
+    meas.principalAxisDefinition = ['regionprops3 PrincipalAxisLength is the full ', ...
+        'axis length of the equivalent ellipsoid, in isotropic voxel units. ', ...
+        'It is not the analytic semi-axis a, b, or c in mm, and it is not ', ...
+        'scaled by a single spacing. semiAxesMM comes from eig of the ', ...
+        'covariance in millimetres.'];
     meas.orientationDeg = orientationDeg;
     meas.centroidVoxels = centroidVoxels;
     meas.vertices = surfaceMesh.vertices;

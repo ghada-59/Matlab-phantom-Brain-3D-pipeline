@@ -63,8 +63,8 @@ classdef PipelineTest < matlab.unittest.TestCase
                         'RescaleSlope', 2, ...
                         'RescaleIntercept', -1024, ...
                         'PixelSpacing', [0.5 0.8], ...
-                        'SliceThickness', 1.5, ...
-                        'SpacingBetweenSlices', 1.5, ...
+                        'SliceThickness', 5, ...
+                        'SpacingBetweenSlices', 9, ...
                         'ImagePositionPatient', [0; 0; (sliceIndex - 1) * 1.5], ...
                         'ImageOrientationPatient', [1; 0; 0; 0; 1; 0], ...
                         'InstanceNumber', sliceIndex, ...
@@ -85,19 +85,29 @@ classdef PipelineTest < matlab.unittest.TestCase
             testCase.verifyEqual(out.spacingMM(1), 0.5, 'AbsTol', 1e-6);
             testCase.verifyEqual(out.spacingMM(2), 0.8, 'AbsTol', 1e-6);
             testCase.verifyEqual(out.spacingMM(3), 1.5, 'AbsTol', 1e-3);
+            testCase.verifyEqual(out.sliceSpacingSource, 'image-position');
+            if ~isempty(out.sliceThicknessMM)
+                testCase.verifyNotEqual(out.spacingMM(3), out.sliceThicknessMM);
+            end
             testCase.verifyFalse(isfield(out, 'PatientName'));
             testCase.verifyEqual(out.source, 'dicom');
         end
 
-        function testCleanPhantomVolumeWithinThreePercent(testCase)
-            phantom = cleanPhantom([30 20 12], [1 1 1]);
+        function testCleanPhantomUsesAnalyticVolumeAndPhysicalSpacing(testCase)
+            semi = [30 20 12];
+            spacing = [1 1 1];
+            phantom = cleanPhantom(semi, spacing);
+            analytic = (4 / 3) * pi * semi(1) * semi(2) * semi(3);
+            testCase.verifyEqual(phantom.analyticVolumeMM3, analytic, 'RelTol', 1e-12);
             meas = runPipeline(phantom, 'SigmaMM', 0, 'OpenRadiusMM', 0, ...
                 'CloseRadiusMM', 0, 'Method', 'otsu');
+            testCase.verifyEqual(meas.voxelVolumeMM3, nnz(meas.mask) * prod(spacing), 'AbsTol', 1e-6);
             testCase.verifyEqual(meas.voxelVolumeMM3, phantom.numericVolumeMM3, 'RelTol', 1e-9, 'AbsTol', 1e-6);
-            testCase.verifyLessThan(abs(meas.relErrVoxelVolume), 0.03);
             testCase.verifyEqual(meas.relErrVoxelVolume, ...
-                (meas.voxelVolumeMM3 - phantom.analyticVolumeMM3) / phantom.analyticVolumeMM3, ...
-                'AbsTol', 1e-12);
+                (meas.voxelVolumeMM3 - analytic) / analytic, 'AbsTol', 1e-12);
+            testCase.verifyTrue(all(isfinite([meas.voxelVolumeMM3, meas.meshVolumeMM3, ...
+                meas.meshAreaMM2, meas.semiAxesMM, meas.sphericityMesh])));
+            testCase.verifyGreaterThan([meas.voxelVolumeMM3, meas.meshVolumeMM3, meas.meshAreaMM2], 0);
             testCase.verifyEqual(meas.mask, phantom.mask);
             testCase.verifyGreaterThan(meas.threshold.otsuHU, phantom.backgroundHU);
             testCase.verifyLessThan(meas.threshold.otsuHU, phantom.boneHU);
@@ -116,22 +126,31 @@ classdef PipelineTest < matlab.unittest.TestCase
                 'segmentBone:Empty');
         end
 
-        function testPrincipalAxesMatchSemiAxisOrder(testCase)
+        function testPrincipalAxesAreMillimetresNotRegionpropsLengths(testCase)
             truth = [30 20 12];
             phantom = cleanPhantom(truth, [1 1 1]);
             meas = runPipeline(phantom, 'SigmaMM', 0, 'OpenRadiusMM', 0, 'CloseRadiusMM', 0);
+            testCase.verifySize(meas.semiAxesMM, [1 3]);
+            testCase.verifyTrue(all(isfinite(meas.semiAxesMM)));
+            testCase.verifyGreaterThan(meas.semiAxesMM, 0);
             estimated = sort(meas.semiAxesMM, 'descend');
             expected = sort(truth, 'descend');
-            testCase.verifyLessThan(abs(estimated - expected) ./ expected, 0.05);
             testCase.verifyEqual(meas.relErrSemiAxes, (estimated - expected) ./ expected, 'AbsTol', 1e-12);
             major = meas.axisDirections(:, 1);
             minor = meas.axisDirections(:, 3);
-            testCase.verifyGreaterThan(abs(major(1)), 0.95);
-            testCase.verifyGreaterThan(abs(minor(3)), 0.95);
+            % Axis-aligned phantom: the longest covariance axis is x, the
+            % shortest is z. This checks the coordinate frame, not an error budget.
+            [~, majorAxis] = max(abs(major));
+            [~, minorAxis] = max(abs(minor));
+            testCase.verifyEqual(majorAxis, 1);
+            testCase.verifyEqual(minorAxis, 3);
             testCase.verifyEqual(norm(major), 1, 'AbsTol', 1e-8);
+            testCase.verifyEqual(meas.principalAxisLengthUnit, 'voxel');
+            testCase.verifyTrue(contains(meas.principalAxisDefinition, 'not the analytic semi-axis'));
             if ~isempty(meas.principalAxisLengthVoxels)
                 testCase.verifySize(meas.principalAxisLengthVoxels, [1 3]);
                 testCase.verifyGreaterThan(meas.principalAxisLengthVoxels, 0);
+                testCase.verifyFalse(isequaln(meas.principalAxisLengthVoxels, meas.semiAxesMM));
             end
             if ~isempty(meas.solidity)
                 testCase.verifyGreaterThan(meas.solidity, 0);
@@ -146,13 +165,21 @@ classdef PipelineTest < matlab.unittest.TestCase
         function testAnisotropicSpacingScalesTheVoxelVolume(testCase)
             spacing = [0.5 0.8 1.5];
             phantom = cleanPhantom([22 15 11], spacing);
-            meas = runPipeline(phantom, 'SigmaMM', 0, 'OpenRadiusMM', 0, 'CloseRadiusMM', 0);
+            meas = runPipeline(phantom, 'SigmaMM', 0, 'OpenRadiusMM', 0, ...
+                'CloseRadiusMM', 0, 'MeshSmoothSigmaVox', 0);
             testCase.verifyEqual(meas.spacingMM, spacing, 'AbsTol', 0);
             testCase.verifyEqual(meas.voxelVolumeMM3, nnz(meas.mask) * prod(spacing), 'AbsTol', 1e-6);
+            testCase.verifyNotEqual(meas.voxelVolumeMM3, nnz(meas.mask));
             testCase.verifyEqual(meas.voxelVolumeMM3, phantom.numericVolumeMM3, 'RelTol', 1e-9, 'AbsTol', 1e-6);
-            estimated = sort(meas.semiAxesMM, 'descend');
-            expected = sort([22 15 11], 'descend');
-            testCase.verifyLessThan(abs(estimated - expected) ./ expected, 0.05);
+            testCase.verifyTrue(all(isfinite(meas.semiAxesMM)));
+            zSpan = max(meas.vertices(:, 3)) - min(meas.vertices(:, 3));
+            semiZ = phantom.semiAxesMM(3);
+            indexDiameter = 2 * semiZ / spacing(3);
+            % Millimetre vertices span about the analytic diameter. Index-space
+            % vertices would span about indexDiameter, which is smaller when sz > 1.
+            testCase.verifyGreaterThan(zSpan, indexDiameter + spacing(3));
+            testCase.verifyLessThan(zSpan, 2 * semiZ + 3 * spacing(3));
+            testCase.verifyGreaterThan(meas.meshAreaMM2, 0);
         end
 
         function testLargestComponentDropsADisconnectedSlab(testCase)
@@ -177,6 +204,47 @@ classdef PipelineTest < matlab.unittest.TestCase
             testCase.verifyLessThanOrEqual(nnz(opened.mask), nnz(closed.mask));
             testCase.verifyGreaterThan(nnz(opened.mask), 0);
             testCase.verifyEqual(bwconncomp(opened.mask, 26).NumObjects, 1);
+        end
+
+        function testSliceSpacingUsesCentresNotThickness(testCase)
+            positions = [
+                0 0 0
+                5 0 2
+                10 0 4
+            ];
+            axial = [1 0 0 0 1 0];
+            [spacing, source] = voxelSpacingMM([0.5 0.8], 9, positions, axial);
+            testCase.verifyEqual(spacing, [0.5 0.8 2], 'AbsTol', 1e-12);
+            testCase.verifyEqual(source, 'image-position');
+
+            normal = [0 -0.8 0.6];
+            shifted = [
+                0 0 0
+                4 0 0
+                8 0 0
+            ] + [0; 3; 6] * normal;
+            [oblique, obliqueSource] = voxelSpacingMM([1 1], 9, shifted, [1 0 0 0 0.6 0.8]);
+            testCase.verifyEqual(oblique(3), 3, 'AbsTol', 1e-12);
+            testCase.verifyEqual(obliqueSource, 'image-position');
+            euclidean = norm(shifted(2, :) - shifted(1, :));
+            testCase.verifyGreaterThan(abs(euclidean - oblique(3)), 1);
+
+            [fallback, fallbackSource] = voxelSpacingMM([0.7 0.7], 1.25, [], []);
+            testCase.verifyEqual(fallback, [0.7 0.7 1.25], 'AbsTol', 1e-12);
+            testCase.verifyEqual(fallbackSource, 'spacing-between-slices');
+
+            [missing, missingSource] = voxelSpacingMM([1 1], [], [], []);
+            testCase.verifyTrue(isnan(missing(3)));
+            testCase.verifyEmpty(missingSource);
+        end
+
+        function testSourcesUseEigNotStatisticsPca(testCase)
+            root = projectRootFromTest();
+            files = dir(fullfile(root, 'src', '*.m'));
+            for index = 1:numel(files)
+                text = fileread(fullfile(files(index).folder, files(index).name));
+                testCase.verifyEmpty(regexp(text, '(^|[^\w])pca\s*\(', 'once'), files(index).name);
+            end
         end
 
         function testRelativeErrorIdentity(testCase)

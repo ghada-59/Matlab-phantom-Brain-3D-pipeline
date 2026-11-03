@@ -18,6 +18,14 @@ function meas = runPipeline(source, varargin)
     meas = meshAndMeasure(segmentation.mask, volume.spacingMM, varargin{:});
 
     meas.spacingMM = volume.spacingMM;
+    meas.sliceSpacingSource = '';
+    meas.sliceThicknessMM = [];
+    if isfield(volume, 'sliceSpacingSource')
+        meas.sliceSpacingSource = volume.sliceSpacingSource;
+    end
+    if isfield(volume, 'sliceThicknessMM')
+        meas.sliceThicknessMM = volume.sliceThicknessMM;
+    end
     meas.source = volume.source;
     meas.huConfirmed = volume.huConfirmed;
     meas.rescaleSlope = volume.rescaleSlope;
