@@ -38,13 +38,13 @@ Le test de cette étape est `tests/PhantomGenerationTest.m`. Il n'a pas été la
 
 `runPipeline` enchaîne trois fonctions. Les options de segmentation et de maillage sont des paramètres ; les erreurs ne sont calculées que lorsque le code est exécuté.
 
-1. `readVolumeHU` lit un fantôme déjà en HU, ou une série DICOM. Pour le DICOM : `HU = valeur stockée × RescaleSlope + RescaleIntercept`. L'espacement est `[sy sx sz]` en millimètres. S'il manque, la fonction s'arrête au lieu de supposer 1 mm. Les attributs identifiants (nom, identifiant, date de naissance) ne sont pas recopiés.
+1. `readVolumeHU` lit un fantôme déjà en HU, ou une série DICOM. Pour le DICOM : `HU = valeur stockée × RescaleSlope + RescaleIntercept`, une seule fois. L'espacement dans le plan est `PixelSpacing`. L'espacement entre coupes est la distance des centres le long de la normale (`ImagePositionPatient`, `ImageOrientationPatient`), ou `SpacingBetweenSlices` si les positions ne la donnent pas. `SliceThickness` est conservée comme épaisseur de coupe et n'est pas utilisée comme cet espacement. S'il manque, la fonction s'arrête au lieu de supposer 1 mm. Les attributs identifiants ne sont pas recopiés.
 2. `segmentBone` lisse avec `imgaussfilt3` (écart-type en millimètres, converti en voxels anisotropes), seuille par Otsu (`multithresh`) ou par un seuil fixe (réglage par défaut 300 HU), puis `imopen`, `imclose`, `imfill`, `bwareaopen` et la plus grande composante connexe. Les rayons morphologiques par défaut sont nuls, parce qu'une ouverture enlève une coquille et biaise le volume.
-3. `meshAndMeasure` calcule le volume voxel `N × sy × sx × sz`, un maillage `isosurface`, l'aire par somme des triangles, le volume du maillage par le théorème de la divergence, et les demi-axes par ACP des centres de voxels en millimètres (`demi-axe = sqrt(5 × valeur propre)`, correction de Sheppard `s²/12`). `regionprops3` fournit aussi la solidité et des longueurs en voxels : ces longueurs supposent des voxels isotropes, elles ne sont pas converties avec un seul espacement. La sphéricité est `π^(1/3) (6V)^(2/3) / A`.
+3. `meshAndMeasure` calcule le volume voxel `N × sy × sx × sz` en mm³, un maillage `isosurface` en coordonnées millimétriques, l'aire par somme des triangles, le volume du maillage par le théorème de la divergence, et les demi-axes par la covariance des centres de voxels en millimètres (`eig`, pas la fonction `pca` de la Statistics Toolbox ; `demi-axe = sqrt(5 × valeur propre)`, correction de Sheppard `s²/12`). `regionprops3` fournit la solidité et `PrincipalAxisLength` : longueur complète des axes de l'ellipsoïde équivalent, en voxels isotropes. Ce n'est pas `a`, `b`, `c` en millimètres, et ce n'est pas converti avec un seul espacement. La comparaison aux demi-axes analytiques se fait avec `semiAxesMM`. La sphéricité est `π^(1/3) (6V)^(2/3) / A`.
 
 L'aire de référence d'un ellipsoïde est la forme close (sphère, sphéroïde) ou les intégrales elliptiques incomplètes, avec une quadrature paramétrique de contrôle.
 
-Le test de cette étape est `tests/PipelineTest.m`. Il recalcule les formules. Il n'a pas été lancé ici. Un cas sans bruit et sans morphologie demande que le volume voxel reste à moins de 3 % du volume analytique, et que l'ordre des demi-axes estimés suive les demi-axes vrais. Ce seuil est une tolérance de test, pas une erreur mesurée.
+Le test de cette étape est `tests/PipelineTest.m`. Il vérifie la formule `V = 4/3·π·a·b·c`, le volume `N × sy × sx × sz`, et que le pipeline renvoie des champs finis. Il ne fixe pas de seuil du type « erreur de volume inférieure à 3 % ». Les erreurs observées à 0,5 / 1 / 2 mm seront des résultats d'exécution, pas des constantes. Il n'a pas été lancé ici.
 
 Pièges couverts dans le code : voxel anisotrope, `RescaleIntercept` oublié, table du scanner laissée comme seconde composante, confusion `meshgrid` / `ndgrid` (le maillage est construit en ordre image : ligne = y, colonne = x).
 
@@ -92,6 +92,14 @@ Vite écoute sur `0.0.0.0` et le port `PORT`, sinon 5173. Ouvrir `index.html` en
 Les coupes ne sont pas en WebP : MATLAB R2022b n'écrit pas ce format avec `imwrite`. Le dépôt fournit un PNG fenêtré et un JSON des HU bruts. Radix UI, Recharts et react-three-fiber ne sont pas des dépendances : les contrôles natifs et three.js couvrent les vues. Le débruitage par ondelettes appelle `wdenoise2` seulement si la Wavelet Toolbox est installée. Sinon le statut est `unavailable` et le PSNR, le SSIM, le volume et le profil restent « — ». Aucun PSNR de remplacement n'est écrit.
 
 Le test de cette étape est `tests/DashboardContractTest.m`. Il vérifie le tiret cadratin, l'absence de mesures dans `status.json`, l'unité des colorbars et l'absence de jet. Il n'a pas été lancé ici.
+
+## Limites
+
+Projet académique, non clinique. Le nom de portfolio peut être OsteoMorph3D ; le dossier du dépôt reste `projet-3-matlab`.
+
+Le cœur du projet est la validation sur des fantômes ellipsoïdes, de volume analytique `V = 4/3·π·a·b·c`. Un examen CT réel, la vidéo `rotation.mp4` et le maillage STL interactif sont des extensions conditionnelles : le code sait les produire ou les lire, mais aucun de ces fichiers n'a été généré ici. Sans eux, le dashboard affiche « — ».
+
+Les erreurs aux voxels de 0,5 mm, 1 mm et 2 mm ne sont pas écrites dans ce README. Elles n'existent qu'après `matlab -batch "runtests('tests')"` puis `runProject`, avec MATLAB R2022b ou plus récent et l'Image Processing Toolbox.
 
 ## Ce qui reste « — »
 

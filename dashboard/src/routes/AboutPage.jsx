@@ -25,7 +25,7 @@ export default function AboutPage() {
             <li>MATLAB n'a pas été exécuté ici. Les métriques affichent un tiret.</li>
             <li>L'ouverture morphologique enlève une coquille et biaise le volume.</li>
             <li>L'aire du maillage en escalier est souvent plus haute que l'aire lisse.</li>
-            <li>regionprops3 donne des longueurs en voxels isotropes. L'ACP en millimètres est la mesure physique.</li>
+            <li>regionprops3 donne la longueur des axes de l'ellipsoïde équivalent, en voxels. Les demi-axes en millimètres viennent de la covariance (eig), pas de ces longueurs.</li>
             <li>Otsu échoue si l'histogramme n'est pas bimodal, par exemple os fin ou table du scanner fusionnée à l'os.</li>
           </ul>
           <h2>Technologies</h2>

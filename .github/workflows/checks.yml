@@ -1,5 +1,9 @@
 name: checks
 
+# MATLAB is not available on ubuntu-latest, and this workflow does not invoke it.
+# A green run is a file check only. It is not a scientific validation of volumes,
+# areas, axes, or denoising.
+
 on:
   push:
   pull_request:
@@ -22,3 +26,7 @@ jobs:
           fi
           grep -q '"executed": false' dashboard/public/data/status.json
           grep -F 'matlab -batch "runtests('"'"'tests'"'"')"' README.md
+          if grep -RInE '^[[:space:]]*matlab[[:space:]]' .github/workflows; then
+            echo "This workflow must not invoke MATLAB."
+            exit 1
+          fi
