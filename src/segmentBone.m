@@ -36,29 +36,32 @@ function seg = segmentBone(hu, spacingMM, varargin)
     opt = parser.Results;
 
     hu = double(hu);
-    if ndims(hu) ~= 3 || any(~isfinite(hu(:)))
+    if ndims(hu) ~= 3 || isempty(hu) || any(~isfinite(hu(:)))
         error('segmentBone:InvalidVolume', ...
-            'HU volume must be a finite 3-D array.');
+            'HU volume must be a finite, non-empty 3-D array.');
     end
     spacing = double(spacingMM(:)');
     if numel(spacing) ~= 3 || any(~isfinite(spacing)) || any(spacing <= 0)
         error('segmentBone:InvalidSpacing', ...
             'spacingMM must be a positive 3-vector [sy sx sz] in mm.');
     end
-    if ~isscalar(opt.FixedThresholdHU) || ~isfinite(opt.FixedThresholdHU)
+    if ~isscalar(opt.FixedThresholdHU) || ~isfinite(double(opt.FixedThresholdHU))
         error('segmentBone:InvalidThreshold', 'FixedThresholdHU must be a finite scalar.');
     end
+    sigmaMM = scalarOption(opt.SigmaMM, 'segmentBone:InvalidSigma', ...
+        'SigmaMM must be a non-negative finite scalar.', 0);
+    openRadiusMM = scalarOption(opt.OpenRadiusMM, 'segmentBone:InvalidRadius', ...
+        'OpenRadiusMM must be a non-negative finite scalar in mm.', 0);
+    closeRadiusMM = scalarOption(opt.CloseRadiusMM, 'segmentBone:InvalidRadius', ...
+        'CloseRadiusMM must be a non-negative finite scalar in mm.', 0);
+    minVolumeMM3 = scalarOption(opt.MinVolumeMM3, 'segmentBone:InvalidVolume', ...
+        'MinVolumeMM3 must be a non-negative finite scalar in mm^3.', 0);
 
     smoothed = hu;
-    sigmaMM = double(opt.SigmaMM);
     if sigmaMM > 0
-        if ~isscalar(sigmaMM) || ~isfinite(sigmaMM)
-            error('segmentBone:InvalidSigma', 'SigmaMM must be a non-negative finite scalar.');
-        end
+        % imgaussfilt3 expects sigma in voxels, one value per array axis.
         sigmaVoxels = sigmaMM ./ spacing;
         smoothed = imgaussfilt3(hu, sigmaVoxels);
-    elseif sigmaMM < 0
-        error('segmentBone:InvalidSigma', 'SigmaMM must be a non-negative finite scalar.');
     end
 
     intensityMin = min(smoothed(:));
@@ -90,16 +93,16 @@ function seg = segmentBone(hu, spacingMM, varargin)
     end
 
     mask = smoothed >= usedThreshold;
-    if opt.OpenRadiusMM > 0
-        mask = imopen(mask, ballStrel(opt.OpenRadiusMM, spacing));
+    if openRadiusMM > 0
+        mask = imopen(mask, ballStrel(openRadiusMM, spacing));
     end
-    if opt.CloseRadiusMM > 0
-        mask = imclose(mask, ballStrel(opt.CloseRadiusMM, spacing));
+    if closeRadiusMM > 0
+        mask = imclose(mask, ballStrel(closeRadiusMM, spacing));
     end
     mask = imfill(mask, 'holes');
 
-    if opt.MinVolumeMM3 > 0
-        minVoxels = max(1, round(double(opt.MinVolumeMM3) / prod(spacing)));
+    if minVolumeMM3 > 0
+        minVoxels = max(1, round(minVolumeMM3 / prod(spacing)));
         mask = bwareaopen(mask, minVoxels, 26);
     end
 
@@ -123,9 +126,16 @@ function seg = segmentBone(hu, spacingMM, varargin)
         'usedHU', usedThreshold, ...
         'method', method);
     seg.objectsBeforeLargest = objectsBefore;
-    seg.sigmaMM = max(sigmaMM, 0);
-    seg.openRadiusMM = max(double(opt.OpenRadiusMM), 0);
-    seg.closeRadiusMM = max(double(opt.CloseRadiusMM), 0);
+    seg.sigmaMM = sigmaMM;
+    seg.openRadiusMM = openRadiusMM;
+    seg.closeRadiusMM = closeRadiusMM;
+end
+
+function value = scalarOption(value, identifier, message, minimum)
+    value = double(value);
+    if ~isscalar(value) || ~isfinite(value) || value < minimum
+        error(identifier, '%s', message);
+    end
 end
 
 function element = ballStrel(radiusMM, spacing)

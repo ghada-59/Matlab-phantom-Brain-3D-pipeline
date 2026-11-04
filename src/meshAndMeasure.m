@@ -17,8 +17,11 @@ function meas = meshAndMeasure(mask, spacingMM, varargin)
 %
 %       semiAxis = sqrt(5 * eigenvalue).
 %
-%   Sheppard's correction adds s^2/12 on the matching diagonal to account
-%   for the finite voxel. Eigenvectors are unit directions in (x, y, z) =
+%   Each centre stands for a filled rectangular voxel, so s^2/12 (the
+%   variance of a uniform voxel about its centre) is added on the matching
+%   diagonal. Classical Sheppard's correction subtracts s^2/12 from the
+%   second moment of rounded samples. That other model is not applied here.
+%   Eigenvectors are unit directions in (x, y, z) =
 %   (column, row, slice). They are sorted from the longest semi-axis to the
 %   shortest. These semi-axes are the quantities compared with the analytic
 %   a, b, c, both in millimetres.
@@ -66,13 +69,27 @@ function meas = meshAndMeasure(mask, spacingMM, varargin)
     end
 
     [row, col, slc] = ind2sub(size(mask), find(mask));
-    % ind2sub returns columns, and indexing the coordinate rows with those
-    % columns keeps one point per row: [x, y, z] in millimetres.
-    points = [x(col), y(row), z(slc)];
+    % x, y, z are rows. Vector-vector indexing keeps that orientation, so
+    % x(col) is 1-by-N and [x(col), y(row), z(slc)] is 1-by-3N. The product
+    % centered.'*centered would then request an (3N)-by-(3N) array.
+    % One voxel centre per row: N-by-3, columns [x y z] in millimetres.
+    points = [reshape(x(col), [], 1), reshape(y(row), [], 1), reshape(z(slc), [], 1)];
     centroidMM = mean(points, 1);
     centered = points - centroidMM;
-    covariance = (centered.' * centered) / size(centered, 1);
-    % Sheppard's correction, in mm^2, on x, y, z respectively.
+    % 3-by-3 scatter matrix, divided by the number of points. A 3-by-N
+    % layout (one point per column) uses the other product; the divisor is
+    % still the point count, not 3.
+    if size(centered, 2) == 3
+        nPoints = size(centered, 1);
+        covariance = (centered.' * centered) / nPoints;
+    elseif size(centered, 1) == 3
+        nPoints = size(centered, 2);
+        covariance = (centered * centered.') / nPoints;
+    else
+        error('meshAndMeasure:PointLayout', ...
+            'Voxel centres must be N-by-3 or 3-by-N, in millimetres.');
+    end
+    % Variance of a uniform voxel about its centre, in mm^2, on x, y, z.
     covariance(1, 1) = covariance(1, 1) + spacing(2)^2 / 12;
     covariance(2, 2) = covariance(2, 2) + spacing(1)^2 / 12;
     covariance(3, 3) = covariance(3, 3) + spacing(3)^2 / 12;

@@ -86,9 +86,8 @@ classdef PipelineTest < matlab.unittest.TestCase
             testCase.verifyEqual(out.spacingMM(2), 0.8, 'AbsTol', 1e-6);
             testCase.verifyEqual(out.spacingMM(3), 1.5, 'AbsTol', 1e-3);
             testCase.verifyEqual(out.sliceSpacingSource, 'image-position');
-            if ~isempty(out.sliceThicknessMM)
-                testCase.verifyNotEqual(out.spacingMM(3), out.sliceThicknessMM);
-            end
+            testCase.verifyEqual(out.sliceThicknessMM, 5, 'AbsTol', 1e-6);
+            testCase.verifyNotEqual(out.spacingMM(3), out.sliceThicknessMM);
             testCase.verifyFalse(isfield(out, 'PatientName'));
             testCase.verifyEqual(out.source, 'dicom');
         end
@@ -299,6 +298,17 @@ classdef PipelineTest < matlab.unittest.TestCase
             eccentricity = sqrt(1 - (small / major)^2);
             prolate = 2 * pi * small^2 * (1 + (major / (small * eccentricity)) * asin(eccentricity));
             testCase.verifyEqual(referenceEllipsoidArea([major small small]), prolate, 'RelTol', 1e-12);
+        end
+
+        function testFlatPhantomAndNonScalarSigmaAreRejected(testCase)
+            phantom = cleanPhantom([12 9 7], [1 1 1]);
+            phantom.volumeHU = phantom.volumeHU(:, :, 1);
+            testCase.verifyError(@() readVolumeHU(phantom), 'readVolumeHU:BadPhantom');
+            phantom = cleanPhantom([12 9 7], [1 1 1]);
+            testCase.verifyError(@() segmentBone(phantom.volumeHU, phantom.spacingMM, ...
+                'SigmaMM', [0.5 0.5]), 'segmentBone:InvalidSigma');
+            testCase.verifyError(@() segmentBone(phantom.volumeHU, phantom.spacingMM, ...
+                'OpenRadiusMM', -1), 'segmentBone:InvalidRadius');
         end
 
         function testTriaxialAreaMatchesQuadrature(testCase)

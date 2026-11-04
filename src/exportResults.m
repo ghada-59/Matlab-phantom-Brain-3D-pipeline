@@ -48,6 +48,16 @@ function payload = exportResults(meas, outDir, varargin)
     payload.huConfirmed = logical(meas.huConfirmed);
     payload.spacingMM = double(meas.spacingMM(:).');
     payload.spacingOrder = '[sy sx sz] row, column, slice';
+    payload.sliceSpacingSource = '';
+    payload.sliceThicknessMM = [];
+    if isfield(meas, 'sliceSpacingSource') && ~isempty(meas.sliceSpacingSource)
+        payload.sliceSpacingSource = char(meas.sliceSpacingSource);
+    end
+    if isfield(meas, 'sliceThicknessMM')
+        % Header value when the source is DICOM. Empty for a phantom.
+        % It is not copied into spacingMM.
+        payload.sliceThicknessMM = jsonSafeNumber(meas.sliceThicknessMM);
+    end
     payload.measurements = measurementBlock(meas);
     payload.threshold = meas.threshold;
     payload.centroidMM = jsonSafeNumber(double(meas.centroidMM(:).'));

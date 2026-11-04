@@ -8,13 +8,18 @@ import withLoading from './withLoading.jsx';
 import { UNMEASURED } from '../utils/format.js';
 
 function MeasureColumn({ results, batch, status }) {
+  const loaded = Boolean(results?.measurements);
+  let note = status?.reason || 'Aucune exécution.';
+  if (loaded) {
+    note = 'Valeurs lues dans results.json.';
+  } else if (batch && batch.length > 0) {
+    note = 'batch.csv est présent, mais results.json n\'est pas chargé. Cette colonne reste sans mesure.';
+  }
   return (
     <>
       <h2>Mesures</h2>
-      <p className="unit">
-        {status?.executed ? 'Fichier de résultats chargé.' : (status?.reason || 'Aucune exécution.')}
-      </p>
-      <MetricTable measurements={results?.measurements} batch={batch} />
+      <p className="unit">{note}</p>
+      <MetricTable measurements={loaded ? results.measurements : null} batch={loaded ? batch : []} />
     </>
   );
 }
@@ -48,7 +53,11 @@ export default function Layout() {
       <footer className="strip">
         <span>Schéma {version}</span>
         <span>Unités mm, mm², mm³, HU</span>
-        <span>Exécuté : {state.status ? (state.status.executed ? 'oui' : 'non') : UNMEASURED}</span>
+        <span>
+          {state.results
+            ? 'Résultats : chargés'
+            : `Exécuté : ${state.status ? (state.status.executed ? 'oui' : 'non') : UNMEASURED}`}
+        </span>
       </footer>
     </div>
   );

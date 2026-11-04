@@ -30,3 +30,15 @@ jobs:
             echo "This workflow must not invoke MATLAB."
             exit 1
           fi
+          if grep -RInF "within 3 percent" docs README.md AGENTS.md; then
+            echo "Do not document a 3 percent volume-error gate."
+            exit 1
+          fi
+          if grep -RInF "environ 1 à 2" docs README.md; then
+            echo "Do not publish an unmeasured volume-error range."
+            exit 1
+          fi
+          if grep -RInF "environ 2 à 6" docs README.md; then
+            echo "Do not publish an unmeasured area-error range."
+            exit 1
+          fi

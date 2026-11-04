@@ -399,21 +399,21 @@ Polices : DM Sans + JetBrains Mono. Grille de fond fine, axes lisibles, beaucoup
 
 ### 4.4 Pipeline
 
-1.  Lecture DICOM : dicomreadVolume, dicominfo. Conversion en HU avec RescaleSlope et RescaleIntercept.
+1.  Lecture DICOM : dicomreadVolume, dicominfo. Conversion en HU avec RescaleSlope et RescaleIntercept, une seule fois. `dicomreadVolume` renvoie les valeurs stockées.
 
-2.  Espacement des voxels depuis PixelSpacing et SliceThickness (ou SpacingBetweenSlices).
+2.  Espacement `[sy sx sz]` en millimètres. Dans le plan : PixelSpacing. Entre coupes : distance des centres le long de la normale (`ImagePositionPatient`, `ImageOrientationPatient`), sinon `SpacingBetweenSlices` si les positions ne la donnent pas. `SliceThickness` est enregistrée comme épaisseur de coupe et n'est pas cet espacement. S'il manque, le code s'arrête et ne suppose pas 1 mm.
 
-3.  Lissage : imgaussfilt3.
+3.  Lissage : imgaussfilt3, écart-type en millimètres converti en voxels anisotropes.
 
-4.  Segmentation : graythresh / multithresh (Otsu) comparé à un seuil fixe en HU.
+4.  Segmentation : multithresh (Otsu) comparé à un seuil fixe en HU.
 
-5.  Morphologie : imopen, imclose, bwareaopen, puis garder la plus grande composante avec bwconncomp.
+5.  Morphologie : imopen, imclose, imfill, bwareaopen, puis garder la plus grande composante avec bwconncomp. Les rayons morphologiques par défaut sont nuls.
 
-6.  Surface : isosurface, isonormals, reducepatch ; aire par somme des triangles ; volume du maillage par le théorème de la divergence.
+6.  Surface : isosurface en coordonnées millimétriques ; aire par somme des triangles ; volume du maillage par le théorème de la divergence.
 
-7.  Mesures : regionprops3 (Volume, PrincipalAxisLength, Orientation, Centroid, Solidity) ; sphéricité = π^(1/3) (6V)^(2/3) / A.
+7.  Volume voxel `N × sy × sx × sz` en mm³. Demi-axes par la covariance des centres en millimètres (`eig`, `sqrt(5 × valeur propre)`, plus `s²/12` sur la diagonale, variance d'un voxel uniforme). `regionprops3` fournit la solidité et `PrincipalAxisLength` : longueur complète en voxels isotropes, non convertie en millimètres par un seul espacement. Sphéricité = π^(1/3) (6V)^(2/3) / A.
 
-8.  Export : JSON des mesures, STL du maillage, PNG, vidéo.
+8.  Export : JSON des mesures, STL du maillage, PNG fenêtré et JSON des HU bruts, vidéo si l'affichage le permet. `imwrite` n'écrit pas le WebP.
 
 ### 4.5 Visualisation et simulation 3D
 
@@ -423,7 +423,7 @@ Polices : DM Sans + JetBrains Mono. Grille de fond fine, axes lisibles, beaucoup
 
 - **Vidéo de rotation :** camorbit + VideoWriter, MP4 intégré au dashboard.
 
-- **Simulation :** pour chaque taille de voxel et niveau de bruit, générer le fantôme, mesurer, tracer l'erreur de volume (%) en fonction de la résolution. Test d'invariance : tourner le fantôme et vérifier que les mesures ne changent pas.
+- **Simulation :** pour chaque taille de voxel et niveau de bruit, générer le fantôme, mesurer, tracer l'erreur de volume en fonction de la résolution. Une rotation enregistre le changement relatif du volume. Ce changement n'est pas un critère fixé à zéro, ni un seuil de 3 %.
 
 - Si tu ajoutes des cartes de couleur (comme dans ton idée), précise toujours ce que la colorbar représente : HU, distance, erreur.
 
@@ -441,11 +441,9 @@ Polices : DM Sans + JetBrains Mono. Grille de fond fine, axes lisibles, beaucoup
 
 Oublier le voxel anisotrope (volume faux), oublier RescaleIntercept (HU faux), seuil trop bas qui inclut la table du scanner, effet d'escalier sur la surface (aire surestimée), confondre l'ordre des axes dans meshgrid et ndgrid.
 
-### 4.8 Résultats estimés (à confirmer)
+### 4.8 Résultats
 
-- Erreur de volume sur fantôme : environ 1 à 2 % à 0,5 ou 1 mm, plus élevée à 2 mm, de l'ordre de quelques pourcents.
-
-- Erreur d'aire : plus grande que le volume à cause de l'effet d'escalier, environ 2 à 6 % sans lissage du maillage.
+Aucun pourcentage d'erreur n'est une performance de ce dépôt. MATLAB n'y a pas été exécuté. Les erreurs de volume, d'aire et de demi-axes n'existent qu'après `runtests` puis `runProject` sur la machine qui a MATLAB. L'effet d'escalier peut agrandir l'aire du maillage ; l'ampleur se lit dans `validation.csv`, quand ce fichier a été produit.
 
 ### 4.9 Dashboard (React + three.js)
 
@@ -751,7 +749,7 @@ dashboard/
     hooks/         useZoomPan.js  useKeyboardNav.js  useDebounce.js
     styles/        tokens.css  base.css
     utils/         colormaps.js  format.js
-  public/          données exportées (JSON, WebP)
+  public/          données exportées (JSON, PNG, CSV, STL). Ce dépôt MATLAB n'écrit pas de WebP.
   tests/
 ```
 
@@ -763,7 +761,7 @@ dashboard/
 
 - Rendu canvas avec requestAnimationFrame ; fenêtre/niveau dans un Web Worker.
 
-- Coupes pré-calculées en WebP, préchargées autour de la coupe courante.
+- Coupes pré-calculées. Dans ce dépôt, MATLAB écrit un PNG fenêtré et un JSON des HU bruts : `imwrite` ne produit pas de WebP.
 
 - Longues listes (galerie d'erreurs) virtualisées.
 
@@ -807,7 +805,7 @@ Navigateur (React) ──fetch──► FastAPI ──► modèle PyTorch
 | Projet     | Fichiers exportés                                                                                                   |
 |------------|---------------------------------------------------------------------------------------------------------------------|
 | 2 · C++    | results.json (version, date, unités mm, résumé), mc.csv (essais Monte Carlo), points.json (fiduciaux avant / après) |
-| 3 · MATLAB | results.json (mesures, erreurs), coupes en WebP, bone.stl, rotation.mp4, validation.csv                             |
+| 3 · MATLAB | results.json (mesures, erreurs), coupes PNG et JSON des HU, bone.stl, rotation.mp4, validation.csv                  |
 
 Chaque fichier porte un champ de version et d'unités, pour que le dashboard refuse un format qu'il ne comprend pas.
 

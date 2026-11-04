@@ -54,8 +54,11 @@ function meas = runPipeline(source, varargin)
         meas.semiAxesTrueMM = double(volume.semiAxesMM(:)');
         meas.referenceAreaMM2 = referenceEllipsoidArea(meas.semiAxesTrueMM);
         meas.relErrArea = relativeError(meas.meshAreaMM2, meas.referenceAreaMM2);
-        estimated = sort(meas.semiAxesMM, 'descend');
-        truth = sort(meas.semiAxesTrueMM, 'descend');
+        % eig stores a row; the phantom reference may be a column.
+        % Force both to 1-by-3. relativeError is unchanged and still
+        % errors when the two sizes differ.
+        estimated = sort(double(meas.semiAxesMM(:).'), 'descend');
+        truth = sort(double(meas.semiAxesTrueMM(:).'), 'descend');
         meas.relErrSemiAxes = relativeError(estimated, truth);
     end
 end

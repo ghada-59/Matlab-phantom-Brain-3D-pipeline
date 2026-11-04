@@ -1,6 +1,6 @@
 import { useAppState } from '../app/store.js';
 import Panel from '../components/Panel.jsx';
-import { UNMEASURED } from '../utils/format.js';
+import { formatMeasurement, UNMEASURED } from '../utils/format.js';
 
 export default function MesuresPage() {
   const { state } = useAppState();
@@ -20,6 +20,10 @@ export default function MesuresPage() {
               : UNMEASURED}
           </p>
           <p className="unit">Ordre ligne, colonne, coupe. Un espacement manquant n'est pas remplacé par 1 mm.</p>
+          <p className="unit">
+            Épaisseur de coupe DICOM : {formatMeasurement(state.results?.sliceThicknessMM, { digits: 2, unit: 'mm' })}.
+            Origine de l'espacement : {state.results?.sliceSpacingSource || UNMEASURED}.
+          </p>
         </Panel>
         <Panel title="Source">
           <p>{state.results?.source || UNMEASURED}</p>

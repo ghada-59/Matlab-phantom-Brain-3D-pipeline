@@ -4,7 +4,8 @@ function denoised = denoiseVolume(hu, method, spacingMM, sigmaMM)
 %   gaussian  imgaussfilt3, sigma in millimetres converted per axis
 %   median    medfilt3, 3-by-3-by-3 neighbourhood, on HU
 %   bilateral imbilatfilt, on intensities stretched to [0, 1], then stretched back
-%   nlm       imnlmfilt, same stretch
+%   nlm       imnlmfilt, same stretch. A slice with a side shorter than 21
+%             is reflectively padded to 21, filtered, then cropped.
 %   wiener    wiener2 slice by slice, same stretch
 %   wavelet   wdenoise2 slice by slice, on HU, only if that function exists
 %
@@ -41,7 +42,7 @@ function denoised = denoiseVolume(hu, method, spacingMM, sigmaMM)
         case 'bilateral'
             denoised = denoiseSlicewise(hu, @imbilatfilt);
         case 'nlm'
-            denoised = denoiseSlicewise(hu, @imnlmfilt);
+            denoised = denoiseSlicewise(hu, @nlmFiltSlice);
         case 'wiener'
             denoised = denoiseSlicewise(hu, @(slice) wiener2(slice, [3 3]));
         case 'wavelet'
@@ -69,6 +70,26 @@ function out = denoiseSlicewise(hu, filterFcn)
     end
     filtered = denoiseEachSlice(normed, filterFcn);
     out = filtered .* (hi - lo) + lo;
+end
+
+function filtered = nlmFiltSlice(slice)
+%IMNLMFILT rejects an image smaller than 21-by-21 (its default search
+%window). Only this path pads. The crop restores the slice size so PSNR
+%and the voxel count stay on the original grid.
+    minimumSide = 21;
+    rows = size(slice, 1);
+    cols = size(slice, 2);
+    deficit = [max(0, minimumSide - rows), max(0, minimumSide - cols)];
+    if all(deficit == 0)
+        filtered = imnlmfilt(slice);
+        return;
+    end
+    pre = floor(deficit / 2);
+    post = deficit - pre;
+    padded = padarray(slice, pre, 'symmetric', 'pre');
+    padded = padarray(padded, post, 'symmetric', 'post');
+    padded = imnlmfilt(padded);
+    filtered = padded(pre(1) + (1:rows), pre(2) + (1:cols));
 end
 
 function filtered = denoiseEachSlice(normed, filterFcn)

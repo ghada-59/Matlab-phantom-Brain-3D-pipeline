@@ -28,6 +28,9 @@ classdef ExportTest < matlab.unittest.TestCase
             testCase.verifyTrue(payload.executed);
             testCase.verifyEqual(payload.units.intensity, 'HU');
             testCase.verifyEqual(payload.units.volume, 'mm^3');
+            testCase.verifyEqual(payload.spacingMM, meas.spacingMM, 'AbsTol', 0);
+            testCase.verifyEqual(payload.sliceSpacingSource, 'phantom');
+            testCase.verifyEmpty(payload.sliceThicknessMM);
             testCase.verifyEqual(payload.measurements.voxelVolumeMM3, meas.voxelVolumeMM3, 'AbsTol', 1e-6);
             testCase.verifyEqual(payload.measurements.meshAreaMM2, meas.meshAreaMM2, 'AbsTol', 1e-6);
             testCase.verifyEqual(payload.measurements.relErrVoxelVolume, ...

@@ -41,6 +41,12 @@ classdef DashboardContractTest < matlab.unittest.TestCase
             coupesText = fileread(fullfile(root, 'dashboard', 'src', 'features', 'viewer', 'MprViewer.jsx'));
             testCase.verifyTrue(contains(denoiseText, 'unit="HU"'));
             testCase.verifyTrue(contains(coupesText, 'unit="HU"'));
+            viewerText = fileread(fullfile(root, 'dashboard', 'src', 'features', 'viewer', 'MprViewer.jsx'));
+            mesuresText = fileread(fullfile(root, 'dashboard', 'src', 'routes', 'MesuresPage.jsx'));
+            testCase.verifyTrue(contains(viewerText, 'Espacement entre coupes'));
+            testCase.verifyTrue(contains(viewerText, 'Épaisseur de coupe DICOM'));
+            testCase.verifyTrue(contains(mesuresText, 'Épaisseur de coupe DICOM'));
+            testCase.verifyFalse(contains(viewerText, 'Épaisseur {formatMeasurement(thickness'));
             files = listSourceFiles(fullfile(root, 'dashboard', 'src'));
             testCase.verifyGreaterThan(numel(files), 0);
             pattern = 'colormap\s*\(\s*jet|[''"]jet[''"]|rainbow\(';

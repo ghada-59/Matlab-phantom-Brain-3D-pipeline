@@ -67,9 +67,12 @@ export default function MprViewer() {
     offscreen.width = slice.cols;
     offscreen.height = slice.rows;
     offscreen.getContext('2d').putImageData(image, 0, 0);
-    const scale = Math.min(width / slice.cols, height / slice.rows) * viewer.zoom;
-    const drawW = slice.cols * scale;
-    const drawH = slice.rows * scale;
+    const spans = pixelSpans(slice);
+    const physW = slice.cols * spans.column;
+    const physH = slice.rows * spans.row;
+    const scale = Math.min(width / physW, height / physH) * viewer.zoom;
+    const drawW = physW * scale;
+    const drawH = physH * scale;
     context.imageSmoothingEnabled = false;
     context.drawImage(
       offscreen,
@@ -89,8 +92,7 @@ export default function MprViewer() {
   }
 
   const letters = LETTERS[viewer.plane];
-  const spacing = results?.spacingMM;
-  const thickness = Array.isArray(spacing) ? spacing[2] : null;
+  const throughPlane = throughPlaneSpacing(results?.spacingMM, viewer.plane);
   const indexLabel = slice ? `${slice.index} / ${slice.count}` : UNMEASURED;
 
   return (
@@ -128,7 +130,9 @@ export default function MprViewer() {
         <p className="corner tr">
           Coupe {indexLabel}
           <br />
-          Épaisseur {formatMeasurement(thickness, { digits: 2, unit: 'mm' })}
+          Espacement entre coupes {formatMeasurement(throughPlane, { digits: 2, unit: 'mm' })}
+          <br />
+          Épaisseur de coupe DICOM {formatMeasurement(results?.sliceThicknessMM, { digits: 2, unit: 'mm' })}
         </p>
         <p className="corner bl">Zoom {formatMeasurement(viewer.zoom, { digits: 2, unit: '×' })}</p>
         <p className="corner br">{scaleLabel(slice)}</p>
@@ -153,4 +157,30 @@ function scaleLabel(slice) {
     return `Échelle ${UNMEASURED}`;
   }
   return `Échelle ${formatMeasurement(slice.spacingMM[1], { digits: 2, unit: 'mm/colonne' })}`;
+}
+
+function pixelSpans(slice) {
+  return {
+    row: spacingOrSquarePixel(slice?.spacingMM, 0),
+    column: spacingOrSquarePixel(slice?.spacingMM, 1),
+  };
+}
+
+function spacingOrSquarePixel(spacing, index) {
+  const value = Array.isArray(spacing) ? Number(spacing[index]) : NaN;
+  if (Number.isFinite(value) && value > 0) {
+    return value;
+  }
+  // Index-space square pixels. This 1 is not a millimetre assumption:
+  // the millimetre label stays an em dash when spacing is absent.
+  return 1;
+}
+
+function throughPlaneSpacing(spacing, plane) {
+  if (!Array.isArray(spacing) || spacing.length < 3) {
+    return null;
+  }
+  const index = plane === 'coronal' ? 0 : plane === 'sagittal' ? 1 : 2;
+  const value = Number(spacing[index]);
+  return Number.isFinite(value) && value > 0 ? value : null;
 }

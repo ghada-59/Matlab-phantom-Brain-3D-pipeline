@@ -20,6 +20,12 @@ function out = readVolumeHU(source)
 %   Identifying DICOM attributes (patient name, id, birth date, accession)
 %   are never copied into OUT. Gantry tilt is not geometrically corrected;
 %   slice spacing is the distance between sorted slice positions.
+%
+%   Geometry is taken from the spatial struct of dicomreadVolume, because
+%   that struct describes the array just returned. MakeIsotropic is not
+%   requested: resampling would replace the acquired spacing. A directory
+%   that also contains another series is not mixed into the slope or the
+%   spacing when the slice positions identify the volume.
 
     if isstruct(source)
         out = phantomVolume(source);
@@ -49,8 +55,10 @@ function out = phantomVolume(source)
             'Phantom spacingMM must be a positive 3-vector in mm.');
     end
     hu = double(source.volumeHU);
-    if ndims(hu) > 3 || isvector(hu)
-        error('readVolumeHU:BadPhantom', 'Phantom volumeHU must be a 3-D array.');
+    volumeSize = size(hu);
+    if numel(volumeSize) ~= 3 || any(volumeSize < 1) || any(~isfinite(hu(:)))
+        error('readVolumeHU:BadPhantom', ...
+            'Phantom volumeHU must be a finite, non-empty 3-D array.');
     end
     out = emptyOutput(hu, spacing);
     out.rescaleSlope = 1;
@@ -79,28 +87,29 @@ function out = dicomVolume(folder)
             'dicomreadVolume is required to read a DICOM series.');
     end
 
-    meta = seriesMetadata(folder);
+    headers = readableSlices(folder);
     try
+        % Do not pass MakeIsotropic. The default keeps the acquired grid.
+        % dicomreadVolume returns stored samples, shaped
+        % [rows, columns, samples, slices]. The rescale is applied once below.
         [raw, spatial] = dicomreadVolume(folder);
     catch ME
         error('readVolumeHU:DicomRead', ...
             'dicomreadVolume failed for %s (%s).', folder, ME.message);
     end
-    raw = squeeze(raw);
-    if ismatrix(raw)
-        raw = reshape(raw, size(raw, 1), size(raw, 2), 1);
-    end
-    if ndims(raw) ~= 3
-        error('readVolumeHU:DicomShape', ...
-            'Expected a single 3-D series after squeeze, got %d dimensions.', ndims(raw));
-    end
-
-    % dicomreadVolume is treated as returning stored pixel values. The
-    % rescale is applied exactly once here.
+    raw = storedVolume(raw);
+    meta = reduceHeaders(headersForVolume(headers, spatial));
     hu = applyHuRescale(raw, meta.slope, meta.intercept);
-    [positions, orientation] = positionsFromSpatial(spatial, meta);
+    assertVolumeImageSize(spatial, hu);
+    [pixelSpacing, positions, orientation, positionsDescribeVolume] = ...
+        geometryFromSpatial(spatial, meta);
+    if positionsDescribeVolume && size(positions, 1) ~= size(hu, 3)
+        error('readVolumeHU:SliceCount', ...
+            'The series has %d slice positions but the volume has %d slices.', ...
+            size(positions, 1), size(hu, 3));
+    end
     [spacing, sliceSource] = voxelSpacingMM( ...
-        meta.pixelSpacing, meta.spacingBetweenSlices, positions, orientation);
+        pixelSpacing, meta.spacingBetweenSlices, positions, orientation);
     if any(~isfinite(spacing)) || any(spacing <= 0)
         error('readVolumeHU:NoSpacing', ...
             ['Voxel spacing is incomplete (row, column, slice) = [%g %g %g] mm. ', ...
@@ -129,13 +138,107 @@ function out = dicomVolume(folder)
     end
 end
 
-function meta = seriesMetadata(folder)
+function volume = storedVolume(raw)
+% DICOM volumes are [rows, columns, samples, slices]. Drop the sample axis
+% only. squeeze would also drop a singleton row or column and swap the axes.
+    if ndims(raw) == 4
+        if size(raw, 3) ~= 1
+            error('readVolumeHU:DicomShape', ...
+                'Expected one sample per voxel, got %d.', size(raw, 3));
+        end
+        raw = reshape(raw, size(raw, 1), size(raw, 2), size(raw, 4));
+    end
+    if ndims(raw) ~= 3 || size(raw, 3) < 2
+        error('readVolumeHU:DicomShape', ...
+            ['Expected at least two slices so the inter-slice spacing is defined. ', ...
+             'Array size is [%s]. SliceThickness is not a substitute.'], num2str(size(raw)));
+    end
+    volume = raw;
+end
+
+function headers = readableSlices(folder)
     listing = dir(folder);
     listing = listing(~[listing.isdir]);
     if isempty(listing)
         error('readVolumeHU:NoDicom', 'The folder contains no files.');
     end
+    headers = struct( ...
+        'slope', {}, 'intercept', {}, 'hasIntercept', {}, ...
+        'pixelSpacing', {}, 'spacingBetweenSlices', {}, 'sliceThicknessMM', {}, ...
+        'position', {}, 'orientation', {});
+    for index = 1:numel(listing)
+        candidate = fullfile(listing(index).folder, listing(index).name);
+        try
+            info = dicominfo(candidate);
+        catch
+            continue;
+        end
+        headers(end + 1) = headerFromInfo(info); %#ok<AGROW>
+    end
+    if isempty(headers)
+        error('readVolumeHU:NoDicom', 'No DICOM header could be read in %s.', folder);
+    end
+end
 
+function header = headerFromInfo(info)
+    [intercept, hasIntercept] = tagOrPresent(info, 'RescaleIntercept', 0);
+    pixel = numericVector(info, 'PixelSpacing', 2);
+    between = numericVector(info, 'SpacingBetweenSlices', 1);
+    % Recorded only. voxelSpacingMM never receives SliceThickness.
+    thickness = numericVector(info, 'SliceThickness', 1);
+    position = numericVector(info, 'ImagePositionPatient', 3);
+    orientation = numericVector(info, 'ImageOrientationPatient', 6);
+    header = struct();
+    header.slope = tagOr(info, 'RescaleSlope', 1);
+    header.intercept = intercept;
+    header.hasIntercept = hasIntercept;
+    if numel(pixel) >= 2
+        header.pixelSpacing = pixel(1:2).';
+    else
+        header.pixelSpacing = [];
+    end
+    if ~isempty(between)
+        header.spacingBetweenSlices = between(1);
+    else
+        header.spacingBetweenSlices = [];
+    end
+    if ~isempty(thickness)
+        header.sliceThicknessMM = thickness(1);
+    else
+        header.sliceThicknessMM = [];
+    end
+    if numel(position) >= 3
+        header.position = position(1:3).';
+    else
+        header.position = [];
+    end
+    if numel(orientation) >= 6
+        header.orientation = orientation(1:6).';
+    else
+        header.orientation = [];
+    end
+end
+
+function headers = headersForVolume(headers, spatial)
+    positions = matrixWithColumns(spatialField(spatial, 'PatientPositions'), 3);
+    if size(positions, 1) < 1
+        return;
+    end
+    keep = false(1, numel(headers));
+    for index = 1:numel(headers)
+        position = headers(index).position;
+        if numel(position) < 3
+            continue;
+        end
+        delta = positions - position(1:3);
+        keep(index) = any(sum(delta.^2, 2) <= 0.05^2);
+    end
+    if any(keep)
+        headers = headers(keep);
+    end
+end
+
+function meta = reduceHeaders(headers)
     meta = struct();
     meta.slope = [];
     meta.intercept = [];
@@ -145,69 +248,149 @@ function meta = seriesMetadata(folder)
     meta.sliceThicknessMM = [];
     meta.positions = zeros(0, 3);
     meta.orientation = [];
-    readable = 0;
-    for index = 1:numel(listing)
-        candidate = fullfile(listing(index).folder, listing(index).name);
-        try
-            info = dicominfo(candidate);
-        catch
-            continue;
-        end
-        readable = readable + 1;
-        thisSlope = tagOr(info, 'RescaleSlope', 1);
-        [thisIntercept, hasIntercept] = tagOrPresent(info, 'RescaleIntercept', 0);
+    betweenValues = [];
+    thicknessValues = [];
+    for index = 1:numel(headers)
+        item = headers(index);
         if isempty(meta.slope)
-            meta.slope = thisSlope;
-            meta.intercept = thisIntercept;
-        elseif abs(thisSlope - meta.slope) > 1e-6 || abs(thisIntercept - meta.intercept) > 1e-6
+            meta.slope = item.slope;
+            meta.intercept = item.intercept;
+        elseif abs(item.slope - meta.slope) > 1e-6 || abs(item.intercept - meta.intercept) > 1e-6
             error('readVolumeHU:InconsistentRescale', ...
                 'RescaleSlope or RescaleIntercept changes between slices.');
         end
-        meta.interceptWasPresent = meta.interceptWasPresent || hasIntercept;
-
-        pixel = numericVector(info, 'PixelSpacing', 2);
-        if numel(pixel) >= 2 && any(~isfinite(meta.pixelSpacing))
-            meta.pixelSpacing = pixel(1:2).';
+        meta.interceptWasPresent = meta.interceptWasPresent || item.hasIntercept;
+        if numel(item.pixelSpacing) >= 2
+            candidate = item.pixelSpacing(1:2);
+            if any(~isfinite(meta.pixelSpacing))
+                meta.pixelSpacing = candidate;
+            elseif any(abs(meta.pixelSpacing - candidate) > 1e-4)
+                error('readVolumeHU:InconsistentSpacing', ...
+                    'PixelSpacing changes between slices of the series.');
+            end
         end
-        between = numericVector(info, 'SpacingBetweenSlices', 1);
-        if ~isempty(between) && isempty(meta.spacingBetweenSlices)
-            meta.spacingBetweenSlices = between(1);
+        if ~isempty(item.spacingBetweenSlices)
+            betweenValues(end + 1) = item.spacingBetweenSlices; %#ok<AGROW>
         end
-        % Recorded only. voxelSpacingMM never receives this value.
-        thickness = numericVector(info, 'SliceThickness', 1);
-        if ~isempty(thickness) && isempty(meta.sliceThicknessMM)
-            meta.sliceThicknessMM = thickness(1);
+        if ~isempty(item.sliceThicknessMM)
+            thicknessValues(end + 1) = item.sliceThicknessMM; %#ok<AGROW>
         end
-        position = numericVector(info, 'ImagePositionPatient', 3);
-        if numel(position) >= 3
-            meta.positions(end + 1, :) = position(1:3).'; %#ok<AGROW>
+        if numel(item.position) >= 3
+            meta.positions(end + 1, :) = item.position(1:3); %#ok<AGROW>
         end
-        orientation = numericVector(info, 'ImageOrientationPatient', 6);
-        if numel(orientation) >= 6
-            meta.orientation = consistentOrientation(meta.orientation, orientation(1:6).');
+        if numel(item.orientation) >= 6
+            meta.orientation = consistentOrientation(meta.orientation, item.orientation(1:6));
         end
     end
-    if readable == 0
-        error('readVolumeHU:NoDicom', 'No DICOM header could be read in %s.', folder);
+    if isempty(meta.slope)
+        meta.slope = 1;
+        meta.intercept = 0;
+    end
+    % Disagreeing fallbacks are dropped. They are not averaged, and they
+    % are not replaced by SliceThickness.
+    if ~isempty(betweenValues) && all(abs(betweenValues - betweenValues(1)) <= 1e-4)
+        meta.spacingBetweenSlices = betweenValues(1);
+    end
+    if ~isempty(thicknessValues) && all(abs(thicknessValues - thicknessValues(1)) <= 1e-4)
+        meta.sliceThicknessMM = thicknessValues(1);
     end
 end
 
-function [positions, orientation] = positionsFromSpatial(spatial, meta)
-    positions = meta.positions;
-    orientation = meta.orientation;
-    if size(positions, 1) >= 2
+function [pixelSpacing, positions, orientation, positionsDescribeVolume] = ...
+        geometryFromSpatial(spatial, meta)
+    pixelSpacing = pixelSpacingFromSpatial(spatialField(spatial, 'PixelSpacings'), meta.pixelSpacing);
+    positions = matrixWithColumns(spatialField(spatial, 'PatientPositions'), 3);
+    positionsDescribeVolume = size(positions, 1) >= 2;
+    if ~positionsDescribeVolume
+        positions = meta.positions;
+    end
+    orientation = orientationFromSpatial(spatialField(spatial, 'PatientOrientations'), meta.orientation);
+end
+
+function spacing = pixelSpacingFromSpatial(raw, fallback)
+    spacing = fallback;
+    raw = matrixWithColumns(raw, 2);
+    if isempty(raw)
         return;
     end
-    if ~isstruct(spatial) || ~isfield(spatial, 'PatientPositions')
+    valid = all(isfinite(raw), 2) & all(raw > 0, 2);
+    raw = raw(valid, :);
+    if isempty(raw)
         return;
     end
-    spatialPositions = double(spatial.PatientPositions);
-    if size(spatialPositions, 2) ~= 3 && size(spatialPositions, 1) == 3
-        spatialPositions = spatialPositions.';
+    if any(max(raw, [], 1) - min(raw, [], 1) > 1e-4)
+        error('readVolumeHU:InconsistentSpacing', ...
+            'PixelSpacing changes between slices of the volume.');
     end
-    if size(spatialPositions, 2) == 3 && size(spatialPositions, 1) >= 2
-        positions = spatialPositions;
+    spacing = raw(1, :);
+end
+
+function orientation = orientationFromSpatial(raw, fallback)
+    orientation = fallback;
+    if isempty(raw) || ~isnumeric(raw)
+        return;
     end
+    raw = double(raw);
+    if ndims(raw) ~= 3 || size(raw, 1) ~= 2 || size(raw, 2) ~= 3
+        return;
+    end
+    current = [];
+    for index = 1:size(raw, 3)
+        candidate = [reshape(raw(1, :, index), 1, 3), reshape(raw(2, :, index), 1, 3)];
+        if any(~isfinite(candidate))
+            continue;
+        end
+        current = consistentOrientation(current, candidate);
+    end
+    if ~isempty(current)
+        orientation = current;
+    end
+end
+
+function values = matrixWithColumns(raw, columns)
+    values = zeros(0, columns);
+    if isempty(raw) || ~isnumeric(raw)
+        return;
+    end
+    raw = double(raw);
+    if size(raw, 2) ~= columns && size(raw, 1) == columns
+        raw = raw.';
+    end
+    if size(raw, 2) ~= columns
+        return;
+    end
+    values = raw;
+end
+
+function value = spatialField(spatial, name)
+    value = [];
+    if isstruct(spatial) && isfield(spatial, name)
+        value = spatial.(name);
+    end
+end
+
+function assertVolumeImageSize(spatial, hu)
+    expected = matrixRow(spatialField(spatial, 'ImageSize'));
+    if isempty(expected)
+        return;
+    end
+    actual = [size(hu, 1), size(hu, 2), size(hu, 3)];
+    if numel(expected) == 3 && isequal(expected(1:3), actual)
+        return;
+    end
+    if numel(expected) >= 4 && expected(3) == 1 && isequal(expected([1 2 4]), actual)
+        return;
+    end
+    error('readVolumeHU:DicomShape', ...
+        'spatial.ImageSize does not match the HU volume.');
+end
+
+function row = matrixRow(raw)
+    row = [];
+    if isempty(raw) || ~isnumeric(raw)
+        return;
+    end
+    row = double(raw(:).');
 end
 
 function orientation = consistentOrientation(current, candidate)

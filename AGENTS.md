@@ -15,11 +15,11 @@ Planning minute par minute du noyau : docs/PLAN_2H.md (PLAN.md l'emporte en cas 
 ## Spécifications
 - MATLAB R2022b ou plus, Image Processing Toolbox. Vérifier avec license('test','Image_Toolbox') et la commande ver.
 - Données principales : fantômes d'ellipsoïdes (V = 4/3·π·a·b·c), voxels 0,5 / 1 / 2 mm, bruit en HU. Volume CT réel optionnel : vérifie la licence et la taille avant.
-- Pipeline : dicomreadVolume → HU (RescaleSlope, RescaleIntercept) → espacement des voxels → imgaussfilt3 → seuil d'Otsu comparé à un seuil fixe → imopen, imclose, bwareaopen, plus grande composante → isosurface → regionprops3 (Volume, PrincipalAxisLength, Orientation, Solidity) → sphéricité.
+- Pipeline : dicomreadVolume → HU (RescaleSlope, RescaleIntercept), une seule fois → espacement [sy sx sz] (PixelSpacing, puis distance des centres par ImagePositionPatient ; SliceThickness est enregistrée et ne sert pas d'espacement) → imgaussfilt3 → seuil d'Otsu comparé à un seuil fixe → imopen, imclose, bwareaopen, plus grande composante → isosurface → volume N×sy×sx×sz, aire des triangles, volume du maillage par la divergence, demi-axes par eig en mm. regionprops3 fournit la solidité et PrincipalAxisLength en voxels, sans conversion par un seul espacement. Sphéricité = π^(1/3) (6V)^(2/3) / A.
 - Aire du maillage par somme des triangles. Volume du maillage par le théorème de la divergence.
 - Validation : erreur relative du volume et de l'aire, erreur des axes, par taille de voxel et par bruit. Test d'invariance par rotation.
-- Tests avec matlab.unittest (runtests).
-- Export : results.json, coupes en WebP, bone.stl (stlwrite), rotation.mp4 (VideoWriter), validation.csv.
+- Tests avec matlab.unittest (runtests). Ils recalculent les erreurs. Ils n'imposent pas un seuil de 3 %.
+- Export : results.json, coupes PNG fenêtrées et JSON des HU bruts (imwrite n'écrit pas le WebP), bone.stl (stlwrite), rotation.mp4 (VideoWriter), validation.csv.
 - Pièges : voxel anisotrope, RescaleIntercept oublié, table du scanner incluse, effet d'escalier sur la surface.
 - Jamais de colormap jet. Toute colorbar porte son unité.
 - Option : onglet Débruitage (imgaussfilt3, medfilt3, imbilatfilt, imnlmfilt, wiener2), avec l'effet sur l'erreur de volume.

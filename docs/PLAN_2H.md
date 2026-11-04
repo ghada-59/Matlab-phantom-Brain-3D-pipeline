@@ -41,12 +41,14 @@ Step 3. Segmentation: Otsu threshold (multithresh), morphological opening, hole 
 
 Step 4. Mesh and measurements: isosurface to get a triangle mesh, then volume (from voxels and spacing), surface area (from the mesh) and principal axes (PCA of voxel coordinates).
 
-Step 5. Tests with matlab.unittest: on phantoms, the measured volume must be within 3 percent of the analytic volume, and the principal axes must match the semi-axes order. Show the actual errors.
+Step 5. Tests with matlab.unittest: on phantoms, recompute the relative volume error and check that the principal axes use the millimetre frame. Do not encode a universal 3 percent acceptance threshold. Show the actual errors only after MATLAB has run.
 
 Step 6. Run the pipeline on 10 or more phantoms or samples, save a table of measurements, draw a boxplot and one 3D mesh figure, and update the README with method, results and limitations (synthetic data, no clinical validation).
 
 Rules: comment the math briefly, no code I cannot explain, keep functions small, and list what was tested and what was not at the end.
 ```
+
+Les tests de ce dépôt recalculent l'erreur relative. Ils n'imposent pas un seuil de 3 %. Tant que MATLAB n'a pas tourné, cette erreur n'a pas de valeur.
 
 ### Vérifications avant de publier
 
