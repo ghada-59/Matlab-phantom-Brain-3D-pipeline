@@ -1,108 +1,206 @@
-# Morphométrie osseuse 3D à partir de CT (MATLAB)
+# OsteoMorph3D
+### 3D Bone Morphometry from CT · MATLAB · Synthetic Phantom Validation
 
-Projet académique, non clinique. Ce dépôt ne fournit pas d'outil de diagnostic et ne prétend à aucune exactitude clinique.
+> An academic biomedical-image-processing project exploring how voxel geometry, 3D segmentation and surface reconstruction affect bone-like shape measurements. The primary reference is a synthetic ellipsoid with a known analytical volume. Optional DICOM input is supported; this repository is **not a clinical tool**.
 
-Les fantômes sont des ellipsoïdes synthétiques. Aucun examen de patient n'est inclus.
+![Project scope](docs/figures/geometry-concept.svg)
 
-## Exécution
+## Project at a glance
 
-MATLAB n'est pas disponible dans l'environnement qui a préparé ce dépôt (`command -v matlab` ne retourne rien). **Aucun script n'a été exécuté.** Aucun volume, aucune aire et aucune erreur mesurée ne sont publiés. Tant qu'une métrique n'a pas été produite par une exécution locale, elle vaut « — ».
+| Component | What is implemented |
+|---|---|
+| Synthetic reference | 3D ellipsoid phantom with known semi-axes and analytical volume |
+| Image geometry | Physical voxel spacing in mm, including anisotropic grids |
+| DICOM handling | HU rescaling applied once; slice spacing derived from image positions when available |
+| Segmentation | 3D Gaussian smoothing, Otsu or fixed HU threshold, morphology and largest connected component |
+| Morphometry | Voxel volume, mesh area, mesh volume, semi-axes, solidity and sphericity |
+| Validation design | Voxel-size, noise and rotation experiments against synthetic ground truth |
+| Export | JSON, CSV, STL, PNG slice previews and optional MP4 |
+| Viewer | React 18, Vite, React Router and three.js |
 
-Les tests sont écrits pour MATLAB R2022b ou plus récent, avec l'Image Processing Toolbox. Depuis la racine du projet, sous Windows :
+> **Current result status:** the source code, tests and dashboard are in the repository, but MATLAB-generated result files are not. The dashboard status is deliberately `executed: false`. No measured volume, area, axis, error, PSNR or SSIM is claimed in this README.
 
-```bat
-matlab -batch "runtests('tests')"
-```
+## Why a synthetic phantom?
 
-Vérification de la toolbox, dans MATLAB :
+The project starts with a controlled geometric object instead of claiming that an unlabelled clinical CT scan has known ground truth. The ellipsoid semi-axes a, b and c are specified in millimetres, so its exact volume can be calculated independently:
 
-```matlab
-license('test', 'Image_Toolbox')
-ver
-```
+**Analytical volume:** V = 4/3 × π × a × b × c
 
-## Étape 1 — fantôme ellipsoïde
+The raster reference is computed separately from the number of foreground voxel centres and the voxel dimensions:
 
-`src/generateEllipsoidPhantom.m` construit un volume 3D.
+**Voxel volume:** V = Nforeground × sy × sx × sz
 
-- Demi-axes `a`, `b`, `c` en millimètres, le long de `x` (colonnes), `y` (lignes) et `z` (coupes). Sans demi-axes fournis, ils sont tirés uniformément dans l'intervalle **[12, 36] mm**. Cet intervalle est un paramètre du générateur.
-- Volume analytique : `V = 4/3·π·a·b·c`.
-- Volume numérique : nombre de centres de voxels à l'intérieur de l'ellipsoïde, multiplié par le volume d'un voxel. C'est une référence de discrétisation, pas une mesure de segmentation.
-- Espacement `[sy sx sz]` en millimètres (ligne, colonne, coupe). La valeur par défaut `[1 1 1]` est un paramètre.
-- Intensités par défaut : fond **−1000 HU**, os **1000 HU**. Ce sont des réglages de simulation, pas des mesures.
-- Bruit gaussien ajouté après la construction du masque. Le masque et les deux volumes restent géométriques.
+Spacing is stored in MATLAB image order [sy, sx, sz] = [row, column, slice]. Semi-axes are ordered along [x, y, z] = [column, row, slice]. The two representations are kept distinct to avoid mixing physical axes and array indices.
 
-Le test de cette étape est `tests/PhantomGenerationTest.m`. Il n'a pas été lancé ici.
+## Processing workflow
 
-## Étape 2 — pipeline
+![OsteoMorph3D workflow](docs/figures/pipeline-map.svg)
 
-`runPipeline` enchaîne trois fonctions. Les options de segmentation et de maillage sont des paramètres ; les erreurs ne sont calculées que lorsque le code est exécuté.
+1. **Input** — create a reproducible ellipsoid phantom, or optionally read a supplied DICOM series.
+2. **Geometry and calibration** — convert stored values to HU using RescaleSlope and RescaleIntercept exactly once; determine physical voxel spacing.
+3. **Segmentation** — apply optional smoothing in physical units, Otsu or a fixed HU threshold, then 3D cleanup and largest-component selection.
+4. **Surface reconstruction** — create an isosurface in millimetre coordinates.
+5. **Morphometry** — calculate voxel volume, mesh volume, mesh area, semi-axes and shape descriptors.
+6. **Validation** — compare against the analytical phantom reference and run parameter sweeps.
+7. **Export and review** — save result files for the React dashboard and three.js mesh viewer.
 
-1. `readVolumeHU` lit un fantôme déjà en HU, ou une série DICOM. Pour le DICOM : `HU = valeur stockée × RescaleSlope + RescaleIntercept`, une seule fois. L'espacement dans le plan est `PixelSpacing`. L'espacement entre coupes est la distance des centres le long de la normale (`ImagePositionPatient`, `ImageOrientationPatient`), ou `SpacingBetweenSlices` si les positions ne la donnent pas. `SliceThickness` est conservée comme épaisseur de coupe et n'est pas utilisée comme cet espacement. S'il manque, la fonction s'arrête au lieu de supposer 1 mm. Les attributs identifiants ne sont pas recopiés.
-2. `segmentBone` lisse avec `imgaussfilt3` (écart-type en millimètres, converti en voxels anisotropes), seuille par Otsu (`multithresh`) ou par un seuil fixe (réglage par défaut 300 HU), puis `imopen`, `imclose`, `imfill`, `bwareaopen` et la plus grande composante connexe. Les rayons morphologiques par défaut sont nuls, parce qu'une ouverture enlève une coquille et biaise le volume.
-3. `meshAndMeasure` calcule le volume voxel `N × sy × sx × sz` en mm³, un maillage `isosurface` en coordonnées millimétriques, l'aire par somme des triangles, le volume du maillage par le théorème de la divergence, et les demi-axes par la covariance des centres de voxels en millimètres (`eig`, pas la fonction `pca` de la Statistics Toolbox ; `demi-axe = sqrt(5 × valeur propre)`). Chaque centre représente un voxel plein : la variance `s²/12` de ce voxel est ajoutée sur la diagonale. La correction de Sheppard classique, qui retranche `s²/12` au second moment d'échantillons arrondis, n'est pas celle qui est codée. `regionprops3` fournit la solidité et `PrincipalAxisLength` : longueur complète des axes de l'ellipsoïde équivalent, en voxels isotropes. Ce n'est pas `a`, `b`, `c` en millimètres, et ce n'est pas converti avec un seul espacement. La comparaison aux demi-axes analytiques se fait avec `semiAxesMM`. La sphéricité est `π^(1/3) (6V)^(2/3) / A`.
+## Measurement framework
 
-L'aire de référence d'un ellipsoïde est la forme close (sphère, sphéroïde) ou les intégrales elliptiques incomplètes, avec une quadrature paramétrique de contrôle.
+![Three-view morphometry framework](docs/figures/measurement-framework.svg)
 
-Le test de cette étape est `tests/PipelineTest.m`. Il vérifie la formule `V = 4/3·π·a·b·c`, le volume `N × sy × sx × sz`, et que le pipeline renvoie des champs finis. Il ne fixe pas de seuil du type « erreur de volume inférieure à 3 % ». Les erreurs observées à 0,5 / 1 / 2 mm seront des résultats d'exécution, pas des constantes. Il n'a pas été lancé ici.
+| Quantity | Implementation / interpretation |
+|---|---|
+| Voxel volume | Foreground voxel count × sy × sx × sz |
+| Mesh volume | Surface mesh volume calculated with the divergence theorem |
+| Mesh area | Sum of triangle areas |
+| Semi-axes | Covariance eigenvalues of voxel centres in physical coordinates, with the voxel-extent correction described in the source |
+| Solidity | Region occupancy descriptor from the 3D binary mask |
+| Sphericity | π^(1/3) × (6V)^(2/3) / A |
+| Relative error | Calculated only where a valid reference is available |
 
-Pièges couverts dans le code : voxel anisotrope, `RescaleIntercept` oublié, table du scanner laissée comme seconde composante, confusion `meshgrid` / `ndgrid` (le maillage est construit en ordre image : ligne = y, colonne = x).
+For a synthetic phantom, analytical volume, reference surface area and true semi-axes are available. For an ordinary DICOM series, those references are unknown unless an independent ground-truth annotation or reference measurement is supplied. In that case, reference-error fields remain empty.
 
-## Étape 3 — export et validation
+## Dashboard preview
 
-Tout fichier de résultats est produit par une exécution. **Aucun n'a été généré ici**, et aucun n'est versionné (`results/` est ignoré par git).
+![OsteoMorph3D dashboard layout](docs/figures/dashboard-layout.svg)
 
-`runProject` enchaîne, quand vous le lancez dans MATLAB :
+The existing React dashboard is a research viewer for exported data. It includes:
 
-- `validatePhantoms` : tailles de voxel **0,5 / 1 / 2 mm** (paramètres du plan), bruit **0 et 100 HU** (paramètres), rotation de 30 degrés sur des voxels cubiques. Pour chaque condition le code calcule l'erreur relative du volume voxel, du volume maillage, de l'aire et des demi-axes, plus l'écart entre Otsu et le seuil fixe, et l'écart de volume après rotation. La sortie est `results/validation.csv`.
-- `runBatch` : 10 fantômes à demi-axes aléatoires, `results/batch.csv`.
-- `exportResults` : `results.json` (version, unités, mesures), coupes PNG fenêtrées avec le préréglage d'affichage os 1800/400 HU, coupes JSON en HU bruts, `bone.stl`. `rotation.mp4` et les figures sont tentés ; sans affichage, le JSON indique `not_generated` et la raison, et un fichier vidéo partiel est supprimé.
-- `compareDenoising` : gaussien, médian, bilatéral, moyennes non locales, Wiener, et ondelettes si `wdenoise2` existe. PSNR, SSIM si `ssim` existe, et surtout l'erreur de volume. Sans Wavelet Toolbox, la méthode ondelettes a le statut `unavailable` et aucune de ces métriques. `results/denoise.json`.
+- **Coupes** — axial, coronal and sagittal views with window/level controls.
+- **3D** — STL mesh viewer powered by three.js.
+- **Mesures** — physical geometry and morphometry fields.
+- **Validation** — validation sweep and error plots.
+- **Débruitage** — classical-filter comparisons and their effect on volume.
+- **Vidéo** — optional mesh-rotation export.
+- **À propos** — methods, technologies and limitations.
 
-Les coupes PNG ne sont pas du WebP : `imwrite` de MATLAB R2022b n'écrit pas le WebP. Les HU bruts sont dans le JSON de coupe, l'unité est HU.
+The dashboard reads files from dashboard/public/data. Until exports exist, unmeasured quantities are displayed as an em dash (—). The committed status file currently says `executed: false`.
 
-```matlab
-runProject
-```
+**Visual honesty:** the figures above are original explanatory diagrams, not screenshots or measured outputs from MATLAB. No patient CT images, STL mesh, validation plot, denoising result or genuine populated-dashboard screenshot is currently committed. Real output galleries should be added after a local MATLAB run.
 
-Le test de cette étape est `tests/ExportTest.m`. Il recalcule les erreurs à partir des volumes qu'il vient d'obtenir. Il n'a pas été lancé ici.
+## Technical method
 
-## Étape 4 — dashboard statique
+### 1. Phantom generation
 
-Le dashboard est dans `dashboard/`. Il lit uniquement `dashboard/public/data/`. Le fichier versionné `status.json` a `"executed": false`. Chaque mesure absente s'affiche « — ». Aucun chiffre de volume, d'aire, d'axe, de sphéricité, de PSNR ou d'erreur n'est codé en dur.
+The generator in src/generateEllipsoidPhantom.m builds a solid 3D ellipsoid and returns both its binary mask and HU volume. Current defaults are configuration settings, not findings:
 
-Pages : Coupes, 3D, Mesures, Validation, Débruitage, Vidéo, À propos. Pile : React 18, Vite, JSX, React Router en mode hash, Context et `useReducer`. Le maillage passe par three.js (`STLLoader`, `OrbitControls`). Pas de Bootstrap. Pas de colormap jet. Chaque colorbar indique son unité (HU). Les coupes restent en niveaux de gris.
+- Semi-axes are drawn uniformly from 12 to 36 mm when not supplied.
+- Default spacing is [1, 1, 1] mm in row / column / slice order.
+- Simulated background and bone intensities default to −1000 HU and +1000 HU.
+- Gaussian noise is added after the geometric mask is built; the reference mask and analytical volume therefore remain known.
+- A random seed makes phantom generation reproducible.
 
-Les préréglages de fenêtre 1800/400, 400/40 et 1600/−600 HU sont des réglages d'affichage, pas des mesures. Les tailles de voxel 0,5 / 1 / 2 mm citées sur la page Validation sont les conditions prévues par le code, pas des erreurs observées.
+### 2. DICOM and HU conversion
 
-Sans `results.json`, la colonne Mesures et le pied de page restent sur `executed: false` et sur « — ». Si ce fichier est produit plus tard par `runProject`, les valeurs affichées sont celles du fichier : `runProject` ne réécrit pas `status.json`. L'espacement entre coupes et l'épaisseur DICOM sont deux lignes distinctes. Une coupe est dessinée avec le rapport d'aspect `sy` / `sx` de son JSON.
+src/readVolumeHU.m accepts a phantom structure or DICOM folder. The DICOM conversion is:
 
-`npm install` et `npm run build` ont été exécutés dans cet environnement. Le site produit est `dashboard/dist/`, qui n'est pas versionné. Chrome headless a ouvert les pages Coupes, 3D, Mesures, Validation, Débruitage, Vidéo et À propos : `executed` reste non, chaque mesure affiche « — », et les colorbars portent l'unité HU. Ce n'est pas une exécution MATLAB.
+**HU = StoredValue × RescaleSlope + RescaleIntercept**
 
-Pour relancer le serveur de développement :
+In-plane spacing comes from PixelSpacing. Through-plane spacing is derived from the distance between slice centres along the slice normal when image positions are available, or from SpacingBetweenSlices when appropriate. SliceThickness is retained as a separate metadata field and is not substituted for slice spacing. Missing spacing is not silently replaced with an assumed 1 mm. Identifying DICOM attributes are not copied into result exports.
 
-```bat
-cd dashboard
-npm install
-npm run dev
-```
+### 3. Segmentation
 
-Vite écoute sur `0.0.0.0` et le port `PORT`, sinon 5173. Ouvrir `index.html` en `file://` ne charge pas `status.json`.
+src/segmentBone.m applies optional 3D Gaussian smoothing, Otsu threshold estimation or a fixed threshold (default 300 HU), followed by optional opening/closing, hole filling, minimum-volume cleanup and largest 26-connected component selection. The physical sigma and morphology radii are converted using anisotropic voxel spacing. Morphology radii default to zero to avoid silently removing a boundary shell.
 
-`runProject` copie les exports vers `dashboard/public/data/` lorsque ce dossier existe. Il ne remplace pas `status.json`. Le dashboard n'utilise `results.json` que si `executed` est vrai et si `version` est celle de `status.json`.
+A bright scanner table may remain connected to the target if it touches the same component. The current largest-component rule does not claim to resolve that situation.
 
-Les coupes ne sont pas en WebP : MATLAB R2022b n'écrit pas ce format avec `imwrite`. Le dépôt fournit un PNG fenêtré et un JSON des HU bruts. Radix UI, Recharts et react-three-fiber ne sont pas des dépendances : les contrôles natifs et three.js couvrent les vues. Le débruitage par ondelettes appelle `wdenoise2` seulement si la Wavelet Toolbox est installée. Sinon le statut est `unavailable` et le PSNR, le SSIM, le volume et le profil restent « — ». Aucun PSNR de remplacement n'est écrit.
+### 4. Mesh and morphometry
 
-Le test de cette étape est `tests/DashboardContractTest.m`. Il vérifie le tiret cadratin, l'absence de mesures dans `status.json`, l'unité des colorbars et l'absence de jet. Il n'a pas été lancé ici.
+src/meshAndMeasure.m produces an isosurface in physical coordinates, triangle-based area, divergence-theorem mesh volume, covariance-derived semi-axes and additional shape descriptors. The source keeps voxel-space principal-axis lengths distinct from physical semi-axes in millimetres.
 
-## Limites
+### 5. Validation design
 
-Projet académique, non clinique. Le nom de portfolio peut être OsteoMorph3D ; le dossier du dépôt reste `projet-3-matlab`.
+src/validatePhantoms.m defines experiments with the following configured conditions:
 
-Le cœur du projet est la validation sur des fantômes ellipsoïdes, de volume analytique `V = 4/3·π·a·b·c`. Un examen CT réel, la vidéo `rotation.mp4` et le maillage STL interactif sont des extensions conditionnelles : le code sait les produire ou les lire, mais aucun de ces fichiers n'a été généré ici. Sans eux, le dashboard affiche « — ».
+| Factor | Conditions in the code |
+|---|---|
+| Isotropic voxel size | 0.5, 1 and 2 mm |
+| Added Gaussian noise | 0 and 100 HU |
+| Rotation | 0° and 30° |
 
-Les erreurs aux voxels de 0,5 mm, 1 mm et 2 mm ne sont pas écrites dans ce README. Elles n'existent qu'après `matlab -batch "runtests('tests')"` puis `runProject`, avec MATLAB R2022b ou plus récent et l'Image Processing Toolbox.
+These are planned experimental conditions, not observed results. When executed, the validation function calculates relative errors for voxel volume, mesh volume, surface area and semi-axes, plus threshold and rotation comparisons. No accuracy threshold or precomputed error range is claimed.
 
-## Ce qui reste « — »
+### 6. Denoising comparison
 
-Aucun fichier de `results/` n'a été produit. Restent non mesurés, donc affichés « — » : volumes voxel et maillage, aires, demi-axes, sphéricité, solidité, erreurs relatives, PSNR, SSIM, seuil issu d'une exécution, étendue du STL, coupes, vidéo, `validation.csv`, `batch.csv`, `denoise.json` et les figures.
+src/compareDenoising.m compares available classical methods: Gaussian, median, bilateral, non-local means, Wiener and optional wavelet denoising. It records PSNR, SSIM when the relevant function is available, and volume change. Wavelet denoising depends on Wavelet Toolbox; an unavailable method must remain unavailable rather than receiving a placeholder score.
+
+## Repository map
+
+    .github/workflows/   GitHub repository checks
+    src/                 MATLAB phantom, DICOM, segmentation, mesh and validation code
+    tests/               matlab.unittest suites
+    dashboard/           React + Vite research viewer
+    dashboard/public/data/  Export contract and initial status.json
+    docs/                Project plans and explanatory figures
+    data/                Local input location (not committed)
+    results/              Runtime exports (not committed)
+    runProject.m          Experiment and export entry point
+
+## Requirements
+
+- MATLAB R2022b or newer.
+- Image Processing Toolbox.
+- Wavelet Toolbox is optional and only needed for wavelet denoising.
+- Node.js and npm for the dashboard.
+
+Check the MATLAB installation and required toolbox from MATLAB:
+
+    ver
+    license('test', 'Image_Toolbox')
+
+## Run locally on Windows
+
+From the repository root, run the MATLAB unit tests:
+
+    matlab -batch "runtests('tests')"
+
+After reviewing the test report, run the experiment and generate its exports:
+
+    runProject
+
+The project writes files under results and mirrors supported outputs to dashboard/public/data when that directory exists. Expected output types include result and denoising JSON, validation and batch CSV, STL mesh, slice previews and an optional rotation video. These files are generated at runtime and are not included in the current repository snapshot.
+
+Start the dashboard:
+
+    cd dashboard
+    npm install
+    npm run dev
+
+Open the local Vite URL printed in the terminal. Do not open dashboard/index.html directly via file:// because the dashboard loads JSON assets over HTTP.
+
+## Tests and GitHub Actions
+
+The MATLAB test suites cover:
+
+- PhantomGenerationTest.m — analytical formula, raster volume, reproducibility and invalid inputs.
+- PipelineTest.m — HU rescaling, DICOM geometry, physical volume and segmentation contracts.
+- ExportTest.m — export consistency, generated validation calculations and file content.
+- DashboardContractTest.m — status contract, units, unmeasured sentinel and dashboard rules.
+
+**GitHub Actions does not execute MATLAB.** The current checks workflow is a repository-honesty and file-contract check. A green Actions badge is not evidence that MATLAB tests or numerical experiments passed. Run the tests locally with MATLAB and the required toolbox to establish that evidence.
+
+## Scope and limitations
+
+- Academic engineering prototype; not intended for diagnosis, treatment or clinical decision-making.
+- The analytical ground truth is a mathematical ellipsoid, not a manually annotated clinical bone.
+- Synthetic HU values and noise settings are controlled simulation inputs, not a scanner noise model.
+- Largest-component segmentation can fail when unrelated structures touch the target.
+- Mesh measurements depend on grid resolution, surface extraction and smoothing parameters.
+- DICOM support does not establish performance on a representative clinical cohort.
+- No patient data, clinical validation or diagnostic performance claim is included.
+
+## Next evidence to add
+
+After a successful MATLAB run, replace the conceptual previews with genuine project outputs:
+
+1. Axial, coronal and sagittal screenshot with HU window / level labels.
+2. Actual STL surface screenshot with physical axes and scale.
+3. Validation plots generated from validation.csv, with each condition labelled.
+4. Denoising comparison from denoise.json, clearly marking unavailable methods.
+5. Dashboard screenshot whose metrics can be traced to the exported files.
+
+Review all DICOM-derived exports for identifying metadata before publishing. Do not commit identifiable patient images.
+
+---
+
+**Primary language:** MATLAB · **Dashboard:** React / Vite / three.js · **Domain:** Biomedical image processing and 3D geometry · **Status:** Academic / non-clinical
